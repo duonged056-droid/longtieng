@@ -8,16 +8,17 @@ from loguru import logger
 from .step000_video_downloader import get_info_list_from_url, download_single_video, get_target_folder
 from .step010_demucs_vr import separate_all_audio_under_folder, init_demucs, release_model
 from .step020_asr import transcribe_all_audio_under_folder
-from .step021_asr_whisperx import init_whisperx, init_diarize
+from .utils import srt_to_json, cleanup_folder
+from .step021_asr_whisperx import init_whisperx, init_diarize, release_whisperx
 from .step022_asr_funasr import init_funasr
 from .step030_translation import translate_all_transcript_under_folder
 from .step040_tts import generate_all_wavs_under_folder
-from .step042_tts_xtts import init_TTS
-from .step043_tts_cosyvoice import init_cosyvoice
+from .step042_tts_xtts import init_TTS, release_xtts
+from .step043_tts_cosyvoice import init_cosyvoice, release_cosyvoice
 from .step050_synthesize_video import synthesize_all_video_under_folder
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# 跟踪模型初始化状态
+# Track model initialization status
 models_initialized = {
     'demucs': False,
     'xtts': False,
@@ -29,66 +30,37 @@ models_initialized = {
 
 
 def get_available_gpu_memory():
-    """获取当前可用的GPU显存大小（GB）"""
+    """Get the currently available GPU memory size (GB)"""
     try:
         if torch.cuda.is_available():
-            # 获取当前设备的可用显存
+            # Get available memory for the current device
             free_memory = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated(0)
-            return free_memory / (1024 ** 3)  # 转换为GB
-        return 0  # 如果没有GPU或CUDA不可用
+            return free_memory / (1024 ** 3)  # Convert to GB
+        return 0  # If no GPU or CUDA is unavailable
     except Exception:
-        return 0  # 出错时返回0
+        return 0  # Return 0 on error
 
 
 def initialize_models(tts_method, asr_method, diarization):
     """
-    初始化所需的模型。
-    只在第一次调用时初始化模型，避免重复加载。
+    Initialize the required models.
+    Models are only initialized on the first call to avoid redundant loading.
     """
-    # 使用全局状态跟踪已初始化的模型
+    # Use global state to track initialized models
     global models_initialized
 
     with ThreadPoolExecutor() as executor:
         try:
-            # Demucs模型初始化
-            if not models_initialized['demucs']:
-                executor.submit(init_demucs)
-                models_initialized['demucs'] = True
-                logger.info("Demucs模型初始化完成")
-            else:
-                logger.info("Demucs模型已初始化，跳过")
-
-            # TTS模型初始化
-            if tts_method == 'xtts' and not models_initialized['xtts']:
-                executor.submit(init_TTS)
-                models_initialized['xtts'] = True
-                logger.info("XTTS模型初始化完成")
-            elif tts_method == 'cosyvoice' and not models_initialized['cosyvoice']:
-                executor.submit(init_cosyvoice)
-                models_initialized['cosyvoice'] = True
-                logger.info("CosyVoice模型初始化完成")
-
-            # ASR模型初始化
-            if asr_method == 'WhisperX':
-                if not models_initialized['whisperx']:
-                    executor.submit(init_whisperx)
-                    models_initialized['whisperx'] = True
-                    logger.info("WhisperX模型初始化完成")
-                if diarization and not models_initialized['diarize']:
-                    executor.submit(init_diarize)
-                    models_initialized['diarize'] = True
-                    logger.info("Diarize模型初始化完成")
-            elif asr_method == 'FunASR' and not models_initialized['funasr']:
-                executor.submit(init_funasr)
-                models_initialized['funasr'] = True
-                logger.info("FunASR模型初始化完成")
+            # LOẠI BỎ VIỆC NẠP SẴN TẤT CẢ MÔ HÌNH ĐỂ TIẾT KIỆM VRAM
+            # Các mô hình sẽ được nạp theo kiểu "Lazy Load" trong process_video
+            pass
 
         except Exception as e:
             stack_trace = traceback.format_exc()
-            logger.error(f"初始化模型失败: {str(e)}\n{stack_trace}")
-            # 出现错误时，重置初始化状态
+            logger.error(f"Khởi tạo mô hình thất bại: {str(e)}\n{stack_trace}")
+            # Reset initialization state on error
             models_initialized = {key: False for key in models_initialized}
-            release_model()  # 释放已加载的模型
+            release_model()  # Release loaded models
             raise
 
 
@@ -98,23 +70,24 @@ def process_video(info, root_folder, resolution,
                   translation_method, translation_target_language,
                   tts_method, tts_target_language, voice,
                   subtitles, speed_up, fps, background_music, bgm_volume, video_volume,
-                  target_resolution, max_retries, progress_callback=None):
+                  target_resolution, max_retries, progress_callback=None, srt_path=None, skip_asr=False, skip_translation=False, blur_subtitles=False, blur_height=15, blur_y=85):
     """
-    处理单个视频的完整流程，增加了进度回调函数
+    Processing the full workflow for a single video with progress callback support.
 
     Args:
-        progress_callback: 回调函数，用于报告进度和状态，格式为 progress_callback(progress_percent, status_message)
+        progress_callback: Callback function for reporting progress and status, 
+                          format: progress_callback(progress_percent, status_message)
     """
     local_time = time.localtime()
 
-    # 定义进度阶段和权重
+    # Define progress stages and weights
     stages = [
-        ("下载视频...", 10),  # 10%
-        ("人声分离...", 15),  # 15%
-        ("AI智能语音识别...", 20),  # 20%
-        ("字幕翻译...", 25),  # 25%
-        ("AI语音合成...", 20),  # 20%
-        ("视频合成...", 10)  # 10%
+        ("Đang tải video...", 10),  # 10%
+        ("Đang tách nhạc nền & giọng nói...", 15),  # 15%
+        ("Đang nhận dạng giọng nói AI...", 20),  # 20%
+        ("Đang dịch phụ đề...", 25),  # 25%
+        ("Đang lồng tiếng Việt AI...", 20),  # 20%
+        ("Đang hoàn thành video...", 10)  # 10%
     ]
 
     current_stage = 0
@@ -122,22 +95,21 @@ def process_video(info, root_folder, resolution,
 
     # 报告初始进度
     if progress_callback:
-        progress_callback(0, "准备处理...")
+        progress_callback(0, "Chuẩn bị xử lý...")
 
     for retry in range(max_retries):
         try:
-            # 报告进入下载阶段
+            # Report stage: Download
             stage_name, stage_weight = stages[current_stage]
             if progress_callback:
                 progress_callback(progress_base, stage_name)
 
             if isinstance(info, str) and info.endswith('.mp4'):
                 folder = os.path.dirname(info)
-                # os.rename(info, os.path.join(folder, 'download.mp4'))
             else:
                 folder = get_target_folder(info, root_folder)
                 if folder is None:
-                    error_msg = f'无法获取视频目标文件夹: {info["title"]}'
+                    error_msg = f'Không thể truy cập thư mục đích: {info["title"]}'
                     logger.warning(error_msg)
                     return False, None, error_msg
 
@@ -157,16 +129,91 @@ def process_video(info, root_folder, resolution,
                 progress_callback(progress_base, stage_name)
 
             try:
+                # Bước 1: Nạp Demucs
+                init_demucs()
                 status, vocals_path, _ = separate_all_audio_under_folder(
                     folder, model_name=demucs_model, device=device, progress=True, shifts=shifts)
-                logger.info(f'人声分离完成: {vocals_path}')
+                logger.info(f'Tách nhạc nền hoàn tất: {vocals_path}')
+                
+                # Bước 2: Giải phóng Demucs ngay lập tức để dành VRAM cho WhisperX
+                release_model()
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                error_msg = f'人声分离失败: {str(e)}\n{stack_trace}'
+                error_msg = f'Tách nhạc nền thất bại: {str(e)}\n{stack_trace}'
                 logger.error(error_msg)
+                release_model()
                 return False, None, error_msg
 
-            # 完成人声分离阶段，进入语音识别阶段
+            if srt_path and os.path.exists(srt_path):
+                # If SRT provided, convert to JSON and save
+                try:
+                    transcript = srt_to_json(srt_path)
+                    # Save both transcript and translation for TTS compatibility
+                    with open(os.path.join(folder, 'transcript.json'), 'w', encoding='utf-8') as f:
+                        json.dump(transcript, f, indent=4, ensure_ascii=False)
+                    with open(os.path.join(folder, 'translation.json'), 'w', encoding='utf-8') as f:
+                        json.dump(transcript, f, indent=4, ensure_ascii=False)
+                    logger.info(f'Đã sử dụng file SRT ngoài: {srt_path}')
+                    # Skip ASR stage
+                    current_stage += 1
+                    progress_base += stages[current_stage-1][1]
+                except Exception as e:
+                    logger.error(f'Lỗi khi xử lý file SRT ngoài: {str(e)}')
+                    return False, None, f'Lỗi xử lý SRT ngoài: {str(e)}'
+            elif not skip_asr:
+                # Vocal separation done, entering ASR stage
+                current_stage += 1
+                progress_base += stage_weight
+                stage_name, stage_weight = stages[current_stage]
+                if progress_callback:
+                    progress_callback(progress_base, stage_name)
+
+                try:
+                    # Bước 3: Nhận dạng giọng nói (WhisperX) - Nạp nối tiếp bên trong hàm để tiết kiệm VRAM
+                    status, result_json = transcribe_all_audio_under_folder(
+                        folder, asr_method=asr_method, whisper_model_name=whisper_model, device=device,
+                        batch_size=batch_size, diarization=diarization,
+                        min_speakers=whisper_min_speakers,
+                        max_speakers=whisper_max_speakers)
+                    logger.info(f'Nhận dạng giọng nói thành công: {status}')
+                    
+                    # Không cần release_whisperx() thủ công nữa vì nó đã tự giải phóng mô hình cuối (Diarize) bên trong
+                    # Nhưng tốt nhất nên gọi để chắc chắn mọi thứ đã được dọn dẹp
+                    release_whisperx()
+                except Exception as e:
+                    stack_trace = traceback.format_exc()
+                    error_msg = f'Nhận dạng giọng nói thất bại: {str(e)}\n{stack_trace}'
+                    logger.error(error_msg)
+                    release_whisperx()
+                    return False, None, error_msg
+            else:
+                # Skip ASR
+                current_stage += 1
+                progress_base += stage_weight
+
+            # ASR done, entering Translation stage
+            if not skip_translation:
+                current_stage += 1
+                progress_base += stage_weight
+                stage_name, stage_weight = stages[current_stage]
+                if progress_callback:
+                    progress_callback(progress_base, stage_name)
+
+                try:
+                    status, summary, translation = translate_all_transcript_under_folder(
+                        folder, method=translation_method, target_language=translation_target_language)
+                    logger.info(f'Dịch thuật hoàn tất: {status}')
+                except Exception as e:
+                    stack_trace = traceback.format_exc()
+                    error_msg = f'Dịch thuật thất bại: {str(e)}\n{stack_trace}'
+                    logger.error(error_msg)
+                    return False, None, error_msg
+            else:
+                # Skip Translation
+                current_stage += 1
+                progress_base += stage_weight
+
+            # Translation done, entering TTS stage
             current_stage += 1
             progress_base += stage_weight
             stage_name, stage_weight = stages[current_stage]
@@ -174,53 +221,30 @@ def process_video(info, root_folder, resolution,
                 progress_callback(progress_base, stage_name)
 
             try:
-                status, result_json = transcribe_all_audio_under_folder(
-                    folder, asr_method=asr_method, whisper_model_name=whisper_model, device=device,
-                    batch_size=batch_size, diarization=diarization,
-                    min_speakers=whisper_min_speakers,
-                    max_speakers=whisper_max_speakers)
-                logger.info(f'语音识别完成: {status}')
-            except Exception as e:
-                stack_trace = traceback.format_exc()
-                error_msg = f'语音识别失败: {str(e)}\n{stack_trace}'
-                logger.error(error_msg)
-                return False, None, error_msg
-
-            # 完成语音识别阶段，进入翻译阶段
-            current_stage += 1
-            progress_base += stage_weight
-            stage_name, stage_weight = stages[current_stage]
-            if progress_callback:
-                progress_callback(progress_base, stage_name)
-
-            try:
-                status, summary, translation = translate_all_transcript_under_folder(
-                    folder, method=translation_method, target_language=translation_target_language)
-                logger.info(f'翻译完成: {status}')
-            except Exception as e:
-                stack_trace = traceback.format_exc()
-                error_msg = f'翻译失败: {str(e)}\n{stack_trace}'
-                logger.error(error_msg)
-                return False, None, error_msg
-
-            # 完成翻译阶段，进入语音合成阶段
-            current_stage += 1
-            progress_base += stage_weight
-            stage_name, stage_weight = stages[current_stage]
-            if progress_callback:
-                progress_callback(progress_base, stage_name)
-
-            try:
+                # Bước 5: Nạp TTS tùy theo phương pháp
+                if tts_method == 'xtts':
+                    init_TTS()
+                elif tts_method == 'cosyvoice':
+                    init_cosyvoice()
+                    
                 status, synth_path, _ = generate_all_wavs_under_folder(
                     folder, method=tts_method, target_language=tts_target_language, voice=voice)
-                logger.info(f'语音合成完成: {synth_path}')
+                logger.info(f'Lồng tiếng hoàn tất: {synth_path}')
+                
+                # Bước 6: Giải phóng TTS
+                if tts_method == 'xtts':
+                    release_xtts()
+                elif tts_method == 'cosyvoice':
+                    release_cosyvoice()
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                error_msg = f'语音合成失败: {str(e)}\n{stack_trace}'
+                error_msg = f'Lồng tiếng thất bại: {str(e)}\n{stack_trace}'
                 logger.error(error_msg)
+                if tts_method == 'xtts': release_xtts()
+                elif tts_method == 'cosyvoice': release_cosyvoice()
                 return False, None, error_msg
 
-            # 完成语音合成阶段，进入视频合成阶段
+            # TTS done, entering Video Synthesis stage
             current_stage += 1
             progress_base += stage_weight
             stage_name, stage_weight = stages[current_stage]
@@ -230,102 +254,108 @@ def process_video(info, root_folder, resolution,
             try:
                 status, output_video = synthesize_all_video_under_folder(
                     folder, subtitles=subtitles, speed_up=speed_up, fps=fps, resolution=target_resolution,
-                    background_music=background_music, bgm_volume=bgm_volume, video_volume=video_volume)
-                logger.info(f'视频合成完成: {output_video}')
+                    background_music=background_music, bgm_volume=bgm_volume, video_volume=video_volume,
+                    blur_subtitles=blur_subtitles, blur_height=blur_height, blur_y=blur_y)
+                logger.info(f'Tổng hợp video thành công: {output_video}')
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                error_msg = f'视频合成失败: {str(e)}\n{stack_trace}'
+                error_msg = f'Tổng hợp video thất bại: {str(e)}\n{stack_trace}'
                 logger.error(error_msg)
                 return False, None, error_msg
 
-            # 完成所有阶段，报告100%进度
-            if progress_callback:
-                progress_callback(100, "处理完成!")
+            # Hoàn tất mọi giai đoạn, tiến hành dọn dẹp tệp rác
+            try:
+                cleanup_folder(folder)
+            except Exception as e:
+                logger.error(f"Lỗi khi dọn dẹp tệp tạm: {e}")
 
-            return True, output_video, "处理成功"
+            # Hoàn tất mọi giai đoạn, báo cáo tiến độ 100%
+            if progress_callback:
+                progress_callback(100, "Xử lý hoàn tất và đã dọn dẹp!")
+
+            return True, output_video, "Xử lý thành công"
         except Exception as e:
             stack_trace = traceback.format_exc()
-            error_msg = f'处理视频时发生错误 {info["title"] if isinstance(info, dict) else info}: {str(e)}\n{stack_trace}'
+            error_msg = f'Lỗi khi xử lý video {info["title"] if isinstance(info, dict) else info}: {str(e)}\n{stack_trace}'
             logger.error(error_msg)
             if retry < max_retries - 1:
-                logger.info(f'尝试重试 {retry + 2}/{max_retries}...')
+                logger.info(f'Đang thử lại {retry + 2}/{max_retries}...')
             else:
                 return False, None, error_msg
 
-    return False, None, f"达到最大重试次数: {max_retries}"
+    return False, None, f"Đã đạt giới hạn số lần thử lại: {max_retries}"
 
 
 def do_everything(root_folder, url, num_videos=5, resolution='1080p',
-                  demucs_model='htdemucs_ft', device='auto', shifts=5,
-                  asr_method='WhisperX', whisper_model='large', batch_size=32, diarization=False,
+                  demucs_model='htdemucs', device='auto', shifts=1,
+                  asr_method='WhisperX', whisper_model='large', batch_size=4, diarization=False,
                   whisper_min_speakers=None, whisper_max_speakers=None,
-                  translation_method='LLM', translation_target_language='简体中文',
-                  tts_method='xtts', tts_target_language='中文', voice='zh-CN-XiaoxiaoNeural',
+                  translation_method='LLM', translation_target_language='Tiếng Việt',
+                  tts_method='xtts', tts_target_language='Tiếng Việt', voice='vi-VN-HoaiMyNeural',
                   subtitles=True, speed_up=1.00, fps=30,
                   background_music=None, bgm_volume=0.5, video_volume=1.0, target_resolution='1080p',
-                  max_workers=3, max_retries=5, progress_callback=None):
+                  max_workers=3, max_retries=5, progress_callback=None, srt_path=None, skip_asr=False, skip_translation=False, blur_subtitles=False, blur_height=15, blur_y=85):
     """
-    处理整个视频处理流程，增加了进度回调函数
+    Main entry point for handling the entire video processing workflow.
 
     Args:
-        progress_callback: 回调函数，用于报告进度和状态，格式为 progress_callback(progress_percent, status_message)
+        progress_callback: Callback function for reporting progress and status, 
+                          format: progress_callback(progress_percent, status_message)
     """
     try:
         success_list = []
         fail_list = []
         error_details = []
 
-        # 记录处理开始信息和所有参数
+        # Log start information and parameters
         logger.info("-" * 50)
-        logger.info(f"开始处理任务: {url}")
-        logger.info(f"参数: 输出文件夹={root_folder}, 视频数量={num_videos}, 分辨率={resolution}")
-        logger.info(f"人声分离: 模型={demucs_model}, 设备={device}, 移位次数={shifts}")
-        logger.info(f"语音识别: 方法={asr_method}, 模型={whisper_model}, 批大小={batch_size}")
-        logger.info(f"翻译: 方法={translation_method}, 目标语言={translation_target_language}")
-        logger.info(f"语音合成: 方法={tts_method}, 目标语言={tts_target_language}, 声音={voice}")
-        logger.info(f"视频合成: 字幕={subtitles}, 速度={speed_up}, FPS={fps}, 分辨率={target_resolution}")
+        logger.info(f"Bắt đầu nhiệm vụ: {url}")
+        logger.info(f"Tham số: Folder={root_folder}, Số lượng={num_videos}, Độ phân giải={resolution}")
+        logger.info(f"Tách tiếng: Model={demucs_model}, Thiết bị={device}, Shifts={shifts}")
+        logger.info(f"Nhận dạng: Phương pháp={asr_method}, Model={whisper_model}, Batch={batch_size}")
+        logger.info(f"Dịch thuật: Phương pháp={translation_method}, Ngôn ngữ={translation_target_language}")
+        logger.info(f"Lồng tiếng: Phương pháp={tts_method}, Ngôn ngữ={tts_target_language}, Giọng={voice}")
+        logger.info(f"Tổng hợp: Phụ đề={subtitles}, Tốc độ={speed_up}, FPS={fps}, Độ phân giải={target_resolution}")
         logger.info("-" * 50)
 
         url = url.replace(' ', '').replace('，', '\n').replace(',', '\n')
         urls = [_ for _ in url.split('\n') if _]
 
-        # 初始化模型（改用新的初始化函数）
+        # Initialize models
         try:
             if progress_callback:
-                progress_callback(5, "初始化模型中...")
+                progress_callback(5, "Đang khởi tạo các mô hình AI...")
             initialize_models(tts_method, asr_method, diarization)
         except Exception as e:
             stack_trace = traceback.format_exc()
-            logger.error(f"初始化模型失败: {str(e)}\n{stack_trace}")
-            return f"初始化模型失败: {str(e)}", None
+            logger.error(f"Khởi tạo mô hình thất bại: {str(e)}\n{stack_trace}")
+            return f"Khởi tạo mô hình thất bại: {str(e)}", None
 
         out_video = None
         if url.endswith('.mp4'):
             try:
                 import shutil
-                # 获取原始视频文件名（不带路径）
+                # Get original filename
                 original_file_name = os.path.basename(url)
 
-                # 去除文件扩展名，生成文件夹名称
+                # Remove extension to generate folder name
                 new_folder_name = os.path.splitext(original_file_name)[0]
 
-                # 构建新文件夹的完整路径
+                # Build full path for new folder
                 new_folder_path = os.path.join(root_folder, new_folder_name)
 
-                # 在 root_folder 下创建该文件夹
+                # Create the folder under root_folder
                 os.makedirs(new_folder_path, exist_ok=True)
 
-                # 构建原始文件的完整路径
-                original_file_path = os.path.join(root_folder, original_file_name)
+                # Use original url as path since it's local
+                original_file_path = url
 
-                # 构建新位置的完整路径
+                # Build full destination path
                 new_file_path = os.path.join(new_folder_path, "download.mp4")
 
-                # 将视频文件移动到新创建的文件夹中并重命名
+                # Copy video file to the new folder
                 shutil.copy(original_file_path, new_file_path)
-                # 在 root_folder 下创建该文件夹
-                os.makedirs(new_folder_path, exist_ok=True)
-
+                
                 success, output_video, error_msg = process_video(
                     new_file_path, root_folder, resolution,
                     demucs_model, device, shifts,
@@ -333,30 +363,32 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p',
                     translation_method, translation_target_language,
                     tts_method, tts_target_language, voice,
                     subtitles, speed_up, fps, background_music, bgm_volume, video_volume,
-                    target_resolution, max_retries, progress_callback
+                    target_resolution, max_retries, progress_callback,
+                    srt_path=srt_path, skip_asr=skip_asr, skip_translation=skip_translation,
+                    blur_subtitles=blur_subtitles, blur_height=blur_height, blur_y=blur_y
                 )
 
                 if success:
-                    logger.info(f"视频处理成功: {new_file_path}")
-                    return '处理成功', output_video
+                    logger.info(f"Xử lý video thành công: {new_file_path}")
+                    return 'Xử lý thành công', output_video
                 else:
-                    logger.error(f"视频处理失败: {new_file_path}, 错误: {error_msg}")
-                    return f'处理失败: {error_msg}', None
+                    logger.error(f"Xử lý video thất bại: {new_file_path}, Lỗi: {error_msg}")
+                    return f'Xử lý thất bại: {error_msg}', None
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                logger.error(f"处理本地视频失败: {str(e)}\n{stack_trace}")
-                return f"处理本地视频失败: {str(e)}", None
+                logger.error(f"Lỗi khi xử lý video cục bộ: {str(e)}\n{stack_trace}")
+                return f"Lỗi video cục bộ: {str(e)}", None
         else:
             try:
                 videos_info = []
                 if progress_callback:
-                    progress_callback(10, "获取视频信息中...")
+                    progress_callback(10, "Đang lấy thông tin video...")
 
                 for video_info in get_info_list_from_url(urls, num_videos):
                     videos_info.append(video_info)
 
                 if not videos_info:
-                    return "获取视频信息失败，请检查URL是否正确", None
+                    return "Không thể lấy thông tin video, vui lòng kiểm tra URL", None
 
                 for info in videos_info:
                     try:
@@ -368,43 +400,45 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p',
                             translation_method, translation_target_language,
                             tts_method, tts_target_language, voice,
                             subtitles, speed_up, fps, background_music, bgm_volume, video_volume,
-                            target_resolution, max_retries, progress_callback
+                            target_resolution, max_retries, progress_callback,
+                            srt_path=srt_path, skip_asr=skip_asr, skip_translation=skip_translation,
+                            blur_subtitles=blur_subtitles, blur_height=blur_height, blur_y=blur_y
                         )
 
                         if success:
                             success_list.append(info)
                             out_video = output_video
-                            logger.info(f"成功处理视频: {info['title'] if isinstance(info, dict) else info}")
+                            logger.info(f"Đã xử lý xong: {info['title'] if isinstance(info, dict) else info}")
                         else:
                             fail_list.append(info)
                             error_details.append(f"{info['title'] if isinstance(info, dict) else info}: {error_msg}")
                             logger.error(
-                                f"处理视频失败: {info['title'] if isinstance(info, dict) else info}, 错误: {error_msg}")
+                                f"Lỗi khi xử lý: {info['title'] if isinstance(info, dict) else info}, Lỗi: {error_msg}")
                     except Exception as e:
                         stack_trace = traceback.format_exc()
                         fail_list.append(info)
                         error_details.append(f"{info['title'] if isinstance(info, dict) else info}: {str(e)}")
                         logger.error(
-                            f"处理视频出错: {info['title'] if isinstance(info, dict) else info}, 错误: {str(e)}\n{stack_trace}")
+                            f"Lỗi hệ thống khi xử lý: {info['title'] if isinstance(info, dict) else info}, Lỗi: {str(e)}\n{stack_trace}")
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                logger.error(f"获取视频列表失败: {str(e)}\n{stack_trace}")
-                return f"获取视频列表失败: {str(e)}", None
+                logger.error(f"Không thể lấy danh sách video: {str(e)}\n{stack_trace}")
+                return f"Lỗi danh sách video: {str(e)}", None
 
-        # 记录处理结果汇总
+        # Log completion summary
         logger.info("-" * 50)
-        logger.info(f"处理完成: 成功={len(success_list)}, 失败={len(fail_list)}")
+        logger.info(f"Hoàn tất: Thành công={len(success_list)}, Thất bại={len(fail_list)}")
         if error_details:
-            logger.info("失败详情:")
+            logger.info("Chi tiết lỗi:")
             for detail in error_details:
                 logger.info(f"  - {detail}")
 
-        return f'成功: {len(success_list)}\n失败: {len(fail_list)}', out_video
+        return f'Thành công: {len(success_list)}\nThất bại: {len(fail_list)}', out_video
 
     except Exception as e:
-        # 捕获整体处理过程中的任何错误
+        # Capture any overall processing errors
         stack_trace = traceback.format_exc()
-        error_msg = f"处理过程中发生错误: {str(e)}\n{stack_trace}"
+        error_msg = f"Đã xảy ra lỗi trong quá trình xử lý: {str(e)}\n{stack_trace}"
         logger.error(error_msg)
         return error_msg, None
 

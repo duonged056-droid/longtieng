@@ -1,5 +1,34 @@
 import sys
 import os
+
+# PHIÊN BẢN ĐẶC TRỊ - ÉP DÙNG GPU NGAY TỪ DÒNG ĐẦU TIÊN
+if sys.platform == "win32":
+    import site
+    # Tìm kiếm trong tất cả các thư mục site-packages khả thi
+    possible_paths = site.getsitepackages() + [os.path.join(os.path.dirname(os.path.abspath(__file__)), "env", "Lib", "site-packages")]
+    for sp in possible_paths:
+        nvidia_base = os.path.join(sp, "nvidia")
+        if os.path.exists(nvidia_base):
+            for sub_lib in ["cublas", "cudnn", "cuda_nvrtc"]:
+                bin_path = os.path.join(nvidia_base, sub_lib, "bin")
+                if os.path.exists(bin_path):
+                    try:
+                        os.add_dll_directory(bin_path)
+                        # Ghim thêm vào PATH để chắc chắn 100%
+                        if bin_path not in os.environ["PATH"]:
+                            os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
+                    except Exception:
+                        pass
+
+import torch
+
+# KIỂM TRA TRẠNG THÁI GPU
+if torch.cuda.is_available():
+    print(f"✅ ĐÃ NHẬN CARD ĐỒ HỌA: {torch.cuda.get_device_name(0)}")
+    os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
+else:
+    print("❌ CẢNH BÁO: CHƯA NHẬN CARD ĐỒ HỌA. HỆ THỐNG ĐANG CHẠY BẰNG CPU (RẤT CHẬM)")
+
 from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget
 from PySide6.QtCore import Qt
 
@@ -31,13 +60,13 @@ try:
         from tools.do_everything import do_everything
         from tools.utils import SUPPORT_VOICE
     except ImportError as e:
-        print(f"警告: 无法导入一些工具模块: {e}")
-        # 定义临时的支持语音列表
-        SUPPORT_VOICE = ['zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural',
+        print(f"Cảnh báo: Không thể nhập một số mô-đun công cụ: {e}")
+        # Định nghĩa danh sách giọng nói hỗ trợ tạm thời
+        SUPPORT_VOICE = ['vi-VN-HoaiMyNeural', 'vi-VN-NamMinhNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural',
                          'en-US-JennyNeural', 'ja-JP-NanamiNeural']
 
 except ImportError as e:
-    print(f"错误: 初始化应用程序失败: {e}")
+    print(f"Lỗi: Khởi tạo ứng dụng thất bại: {e}")
     sys.exit(1)
 
 
@@ -45,7 +74,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("智能视频多语言AI配音/翻译工具 - Linly-Dubbing")
+        self.setWindowTitle("Công cụ AI Lồng tiếng/Dịch thuật video đa ngôn ngữ - Linly-Dubbing")
         self.resize(1024, 768)
 
         # 创建选项卡
@@ -58,16 +87,16 @@ class MainWindow(QMainWindow):
         # 连接配置页面的配置变更信号到一键自动化页面
         self.settings_tab.config_changed.connect(self.full_auto_tab.update_config)
 
-        # 添加各个选项卡
-        self.tab_widget.addTab(self.full_auto_tab, "一键自动化 One-Click")
-        self.tab_widget.addTab(self.settings_tab, "配置页面 Settings")
-        self.tab_widget.addTab(DownloadTab(), "自动下载视频")
-        self.tab_widget.addTab(DemucsTab(), "人声分离")
-        self.tab_widget.addTab(ASRTab(), "AI智能语音识别")
-        self.tab_widget.addTab(TranslationTab(), "字幕翻译")
-        self.tab_widget.addTab(TTSTab(), "AI语音合成")
-        self.tab_widget.addTab(SynthesizeVideoTab(), "视频合成")
-        self.tab_widget.addTab(LinlyTalkerTab(), "Linly-Talker 对口型（开发中）")
+        # Thêm các tab
+        self.tab_widget.addTab(self.full_auto_tab, "Tự động hóa Một lần nhấp")
+        self.tab_widget.addTab(self.settings_tab, "Cài đặt")
+        self.tab_widget.addTab(DownloadTab(), "Tải video tự động")
+        self.tab_widget.addTab(DemucsTab(), "Tách giọng nói")
+        self.tab_widget.addTab(ASRTab(), "Nhận dạng AI")
+        self.tab_widget.addTab(TranslationTab(), "Dịch phụ đề")
+        self.tab_widget.addTab(TTSTab(), "Tổng hợp giọng nói")
+        self.tab_widget.addTab(SynthesizeVideoTab(), "Tổng hợp video")
+        self.tab_widget.addTab(LinlyTalkerTab(), "Linly-Talker (Đang phát triển)")
 
         # 设置中央窗口部件
         self.setCentralWidget(self.tab_widget)

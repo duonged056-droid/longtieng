@@ -5,12 +5,22 @@ import torch
 import time
 from .utils import save_wav
 import sys
-sys.path.append('CosyVoice/third_party/Matcha-TTS')
-sys.path.append('CosyVoice/')
-from cosyvoice.cli.cosyvoice import CosyVoice
-from cosyvoice.utils.file_utils import load_wav
-import torchaudio
-from modelscope import snapshot_download
+
+# Thêm đường dẫn cho các submodule
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(ROOT_DIR, "CosyVoice"))
+sys.path.append(os.path.join(ROOT_DIR, "CosyVoice", "third_party", "Matcha-TTS"))
+
+try:
+    from cosyvoice.cli.cosyvoice import CosyVoice
+    from cosyvoice.utils.file_utils import load_wav
+    import torchaudio
+    from modelscope import snapshot_download
+    COSYVOICE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Không thể import CosyVoice: {e}. Tính năng CosyVoice sẽ bị vô hiệu hóa.")
+    COSYVOICE_AVAILABLE = False
+
 model = None
 
 def download_cosyvoice():
@@ -46,6 +56,10 @@ language_map = {
 def tts(text, output_path, speaker_wav, model_name="models/TTS/CosyVoice-300M", device='auto', target_language='中文'):
     global model
     
+    if not COSYVOICE_AVAILABLE:
+        logger.error("CosyVoice không khả dụng. Vui lòng kiểm tra thư viện và cấu hình.")
+        return
+
     if os.path.exists(output_path):
         logger.info(f'TTS {text} 已存在')
         return
@@ -65,6 +79,18 @@ def tts(text, output_path, speaker_wav, model_name="models/TTS/CosyVoice-300M", 
             logger.warning(f'TTS {text} 失败')
             logger.warning(e)
 
+
+def release_cosyvoice():
+    """Giải phóng tài nguyên CosyVoice để tiết kiệm VRAM."""
+    global model
+    if model is not None:
+        logger.info("Đang giải phóng tài nguyên CosyVoice...")
+        model = None
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("Đã giải phóng tài nguyên CosyVoice thành công.")
 
 if __name__ == '__main__':
     speaker_wav = r'videos/村长台钓加拿大/20240805 英文无字幕 阿里这小子在水城威尼斯发来问候/audio_vocals.wav'

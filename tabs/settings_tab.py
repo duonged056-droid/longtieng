@@ -1,7 +1,7 @@
 import os
 import json
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-                               QPushButton, QMessageBox, QSplitter)
+                               QPushButton, QMessageBox, QSplitter, QLineEdit, QFileDialog)
 from PySide6.QtCore import Qt, Signal
 
 from ui_components import (CustomSlider, FloatSlider, RadioButtonGroup,
@@ -10,7 +10,7 @@ from ui_components import (CustomSlider, FloatSlider, RadioButtonGroup,
 
 class SettingsTab(QWidget):
     """
-    配置页面，允许用户设置所有处理参数并保存到config.json
+    Trang cấu hình, cho phép người dùng thiết lập tất cả các tham số xử lý và lưu vào config.json
     """
     # 定义配置变更信号
     config_changed = Signal(dict)
@@ -33,13 +33,14 @@ class SettingsTab(QWidget):
         # 添加所有配置控件
         self.add_config_widgets()
 
-        # 创建保存配置按钮
+        # Tạo nút lưu cấu hình
         self.button_layout = QHBoxLayout()
-        self.save_config_button = QPushButton("保存配置")
+        self.save_config_button = QPushButton("Lưu cấu hình人员") # Modified for consistency
+        self.save_config_button = QPushButton("Lưu cấu hình")
         self.save_config_button.clicked.connect(self.save_config)
         self.save_config_button.setMinimumHeight(40)
         self.save_config_button.setStyleSheet("background-color: #4CAF50; color: white;")
-        self.reset_config_button = QPushButton("重置配置")
+        self.reset_config_button = QPushButton("Đặt lại cấu hình")
         self.reset_config_button.clicked.connect(self.reset_config)
         self.reset_config_button.setMinimumHeight(40)
         self.button_layout.addWidget(self.reset_config_button)
@@ -53,161 +54,166 @@ class SettingsTab(QWidget):
 
     def add_config_widgets(self):
         """添加所有配置控件"""
-        # 视频配置
-        self.scroll_layout.addWidget(QLabel("=== 视频下载配置 ==="))
-        self.scroll_layout.addWidget(QLabel("视频输出文件夹"))
-        self.video_folder = self.add_label_value("videos", "视频输出到此文件夹")
+        # Cấu hình video
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình tải video ==="))
+        self.scroll_layout.addWidget(QLabel("Thư mục đầu ra video"))
+        
+        folder_layout = QHBoxLayout()
+        self.video_folder = QLineEdit("videos")
+        self.btn_select_folder = QPushButton("📂 Chọn")
+        self.btn_select_folder.clicked.connect(self.select_output_folder)
+        folder_layout.addWidget(self.video_folder)
+        folder_layout.addWidget(self.btn_select_folder)
+        self.scroll_layout.addLayout(folder_layout)
 
-        # 分辨率
+        # Độ phân giải
         self.resolution = RadioButtonGroup(
             ['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'],
-            "分辨率",
+            "Độ phân giải",
             '1080p'
         )
         self.scroll_layout.addWidget(self.resolution)
 
-        # 下载视频数量
-        self.video_count = CustomSlider(1, 100, 1, "下载视频数量", 5)
+        # Số lượng video tải xuống
+        self.video_count = CustomSlider(1, 100, 1, "Số lượng video tải xuống", 5)
         self.scroll_layout.addWidget(self.video_count)
 
-        # 音频处理配置
-        self.scroll_layout.addWidget(QLabel("=== 音频处理配置 ==="))
-        # 模型
+        # Cấu hình xử lý âm thanh
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình xử lý âm thanh ==="))
+        # Mô hình
         self.model = RadioButtonGroup(
             ['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q',
              'SIG'],
-            "人声分离模型",
-            'htdemucs_ft'
+            "Mô hình tách giọng nói",
+            'htdemucs'
         )
         self.scroll_layout.addWidget(self.model)
 
-        # 计算设备
-        self.device = RadioButtonGroup(['auto', 'cuda', 'cpu'], "计算设备", 'auto')
+        # Thiết bị tính toán
+        self.device = RadioButtonGroup(['auto', 'cuda', 'cpu'], "Thiết bị tính toán", 'auto')
         self.scroll_layout.addWidget(self.device)
 
-        # 移位次数
-        self.shifts = CustomSlider(0, 10, 1, "移位次数 Number of shifts", 5)
+        # Số lần dịch chuyển
+        self.shifts = CustomSlider(0, 10, 1, "Số lần dịch chuyển (Shifts)", 1)
         self.scroll_layout.addWidget(self.shifts)
 
-        # ASR配置
-        self.scroll_layout.addWidget(QLabel("=== 语音识别配置 ==="))
-        # ASR模型选择
-        self.asr_model_label = QLabel("ASR模型选择")
+        # Cấu hình ASR
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình nhận dạng giọng nói ==="))
+        # Chọn mô hình ASR
+        self.asr_model_label = QLabel("Chọn mô hình ASR")
         self.scroll_layout.addWidget(self.asr_model_label)
-        self.asr_model = RadioButtonGroup(['WhisperX', 'FunASR'], "ASR模型选择", 'WhisperX')
+        self.asr_model = RadioButtonGroup(['WhisperX', 'FunASR'], "Chọn mô hình ASR", 'WhisperX')
         self.scroll_layout.addWidget(self.asr_model)
 
-        # WhisperX模型大小
-        self.whisperx_size = RadioButtonGroup(['large', 'medium', 'small', 'base', 'tiny'], "WhisperX模型大小", 'large')
+        # Kích thước mô hình WhisperX
+        self.whisperx_size = RadioButtonGroup(['large', 'medium', 'small', 'base', 'tiny'], "Kích thước mô hình WhisperX", 'large')
         self.scroll_layout.addWidget(self.whisperx_size)
 
-        # 批处理大小
-        self.batch_size = CustomSlider(1, 128, 1, "批处理大小 Batch Size", 32)
+        # Batch Size
+        self.batch_size = CustomSlider(1, 128, 1, "Batch Size (Kích thước lô)", 2)
         self.scroll_layout.addWidget(self.batch_size)
 
-        # 分离多个说话人
-        self.separate_speakers = RadioButtonGroup([True, False], "分离多个说话人", True)
+        # Tách nhiều người nói
+        self.separate_speakers = RadioButtonGroup([True, False], "Tách nhiều người nói", True)
         self.scroll_layout.addWidget(self.separate_speakers)
 
-        # 最小说话人数
-        self.min_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "最小说话人数", None)
+        # Số người nói tối thiểu
+        self.min_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "Số người nói tối thiểu", None)
         self.scroll_layout.addWidget(self.min_speakers)
 
-        # 最大说话人数
-        self.max_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "最大说话人数", None)
+        # Số người nói tối đa
+        self.max_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "Số người nói tối đa", None)
         self.scroll_layout.addWidget(self.max_speakers)
 
-        # 翻译配置
-        self.scroll_layout.addWidget(QLabel("=== 翻译配置 ==="))
-        # 翻译方式
-        self.translation_method_label = QLabel("翻译方式")
+        # Cấu hình dịch thuật
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình dịch thuật ==="))
+        # Phương thức dịch
+        self.translation_method_label = QLabel("Phương thức dịch")
         self.scroll_layout.addWidget(self.translation_method_label)
         self.translation_method = RadioButtonGroup(
             ['OpenAI', 'LLM', 'Google Translate', 'Bing Translate', 'Ernie', '火山引擎-deepseek', "deepseek-api",
-             "阿里云-通义千问","Ollama"], "翻译方式", 'LLM')
+             "阿里云-通义千问","Ollama"], "Phương thức dịch", 'LLM')
         self.scroll_layout.addWidget(self.translation_method)
 
-        # 目标语言 (翻译)
-        self.target_language_translation_label = QLabel("目标语言 (翻译)")
+        # Ngôn ngữ mục tiêu (Dịch)
+        self.target_language_translation_label = QLabel("Ngôn ngữ mục tiêu (Dịch)")
         self.scroll_layout.addWidget(self.target_language_translation_label)
         self.target_language_translation = RadioButtonGroup(
-            ['简体中文', '繁体中文', 'English', 'Cantonese', 'Japanese', 'Korean'], "目标语言 (翻译)", '简体中文')
+            ['Tiếng Việt', 'Tiếng Trung (Giản thể)', 'Tiếng Trung (Phồn thể)', 'English', 'Tiếng Quảng Đông', 'Tiếng Nhật', 'Tiếng Hàn'], "Ngôn ngữ mục tiêu (Dịch)", 'Tiếng Việt')
         self.scroll_layout.addWidget(self.target_language_translation)
 
-        # TTS配置
-        self.scroll_layout.addWidget(QLabel("=== 语音合成配置 ==="))
-        # AI语音生成方法
-        self.tts_method_label = QLabel("AI语音生成方法")
+        # Cấu hình TTS
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình tổng hợp giọng nói ==="))
+        # Phương pháp tạo giọng nói AI
+        self.tts_method_label = QLabel("Phương pháp tạo giọng nói AI")
         self.scroll_layout.addWidget(self.tts_method_label)
-        self.tts_method = RadioButtonGroup(['xtts', 'cosyvoice', 'EdgeTTS'], "AI语音生成方法", 'EdgeTTS')
+        self.tts_method = RadioButtonGroup(['xtts', 'cosyvoice', 'EdgeTTS'], "Phương pháp tạo giọng nói AI", 'EdgeTTS')
         self.scroll_layout.addWidget(self.tts_method)
 
-        # 目标语言 (TTS)
-        self.target_language_tts_label = QLabel("目标语言 (TTS)")
+        # Ngôn ngữ mục tiêu (TTS)
+        self.target_language_tts_label = QLabel("Ngôn ngữ mục tiêu (TTS)")
         self.scroll_layout.addWidget(self.target_language_tts_label)
         self.target_language_tts = RadioButtonGroup(
-            ['中文', 'English', '粤语', 'Japanese', 'Korean', 'Spanish', 'French'], "目标语言 (TTS)", '中文')
+            ['Tiếng Việt', 'Tiếng Trung', 'English', 'Tiếng Quảng Đông', 'Tiếng Nhật', 'Tiếng Hàn', 'Tiếng Tây Ban Nha', 'Tiếng Pháp'], "Ngôn ngữ mục tiêu (TTS)", 'Tiếng Việt')
         self.scroll_layout.addWidget(self.target_language_tts)
 
-        # EdgeTTS声音选择
-        self.edge_tts_voice_label = QLabel("EdgeTTS声音选择")
+        # Chọn giọng nói EdgeTTS
+        self.edge_tts_voice_label = QLabel("Chọn giọng nói EdgeTTS")
         self.scroll_layout.addWidget(self.edge_tts_voice_label)
         self.edge_tts_voice = RadioButtonGroup(
-            ['zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural', 'en-US-JennyNeural', 'ja-JP-NanamiNeural'],
-            "EdgeTTS声音选择", 'zh-CN-XiaoxiaoNeural')
+            ['vi-VN-HoaiMyNeural', 'vi-VN-NamMinhNeural', 'zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural', 'en-US-JennyNeural', 'ja-JP-NanamiNeural'],
+            "Chọn giọng nói EdgeTTS", 'vi-VN-HoaiMyNeural')
         self.scroll_layout.addWidget(self.edge_tts_voice)
 
-        # 视频合成配置
-        self.scroll_layout.addWidget(QLabel("=== 视频合成配置 ==="))
-        # 添加字幕
-        self.add_subtitles = RadioButtonGroup([True, False], "添加字幕", True)
+        # Cấu hình tổng hợp video
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình tổng hợp video ==="))
+        # Thêm phụ đề
+        self.add_subtitles = RadioButtonGroup([True, False], "Thêm phụ đề", True)
         self.scroll_layout.addWidget(self.add_subtitles)
 
-        # 加速倍数
-        self.speed_factor = FloatSlider(0.5, 2, 0.05, "加速倍数", 1.00)
+        # Tốc độ tăng tốc
+        self.speed_factor = FloatSlider(0.5, 2, 0.05, "Tốc độ tăng tốc", 1.00)
         self.scroll_layout.addWidget(self.speed_factor)
 
-        # 帧率
-        self.frame_rate = CustomSlider(1, 60, 1, "帧率", 30)
+        # Tốc độ khung hình
+        self.frame_rate = CustomSlider(1, 60, 1, "Tốc độ khung hình (FPS)", 30)
         self.scroll_layout.addWidget(self.frame_rate)
 
-        # 背景音乐
-        self.background_music = AudioSelector("背景音乐")
+        # Nhạc nền
+        self.background_music = AudioSelector("Nhạc nền")
         self.scroll_layout.addWidget(self.background_music)
 
-        # 背景音乐音量
-        self.bg_music_volume = FloatSlider(0, 1, 0.05, "背景音乐音量", 0.5)
+        # Âm lượng nhạc nền
+        self.bg_music_volume = FloatSlider(0, 1, 0.05, "Âm lượng nhạc nền", 0.5)
         self.scroll_layout.addWidget(self.bg_music_volume)
 
-        # 视频音量
-        self.video_volume = FloatSlider(0, 1, 0.05, "视频音量", 1.0)
+        # Âm lượng video
+        self.video_volume = FloatSlider(0, 1, 0.05, "Âm lượng video", 1.0)
         self.scroll_layout.addWidget(self.video_volume)
 
-        # 分辨率 (输出)
+        # Độ phân giải (đầu ra)
         self.output_resolution = RadioButtonGroup(
             ['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'],
-            "输出分辨率",
+            "Độ phân giải đầu ra",
             '1080p'
         )
         self.scroll_layout.addWidget(self.output_resolution)
 
-        # 高级配置
-        self.scroll_layout.addWidget(QLabel("=== 高级配置 ==="))
-        # Max Workers
-        self.max_workers = CustomSlider(1, 100, 1, "Max Workers", 1)
+        # Cấu hình nâng cao
+        self.scroll_layout.addWidget(QLabel("=== Cấu hình nâng cao ==="))
+        # Số luồng tối đa (Max Workers)
+        self.max_workers = CustomSlider(1, 100, 1, "Số luồng tối đa (Max Workers)", 1)
         self.scroll_layout.addWidget(self.max_workers)
 
-        # Max Retries
-        self.max_retries = CustomSlider(1, 10, 1, "Max Retries", 3)
+        # Số lần thử lại tối đa (Max Retries)
+        self.max_retries = CustomSlider(1, 10, 1, "Số lần thử lại tối đa (Max Retries)", 3)
         self.scroll_layout.addWidget(self.max_retries)
 
-    def add_label_value(self, value, tooltip=None):
-        """为简单的文本值创建一个标签"""
-        label = QLabel(value)
-        if tooltip:
-            label.setToolTip(tooltip)
-        self.scroll_layout.addWidget(label)
-        return label
+    def select_output_folder(self):
+        """选择输出文件夹"""
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục đầu ra", self.video_folder.text())
+        if folder:
+            self.video_folder.setText(folder)
 
     def get_config(self):
         """从UI控件中获取当前配置"""
@@ -256,8 +262,8 @@ class SettingsTab(QWidget):
             self.video_count.setValue(config.get("video_count", 5))
 
             # 模型
-            model_value = config.get("model", "htdemucs_ft")
-            self._set_radio_button(self.model.buttons, model_value, "htdemucs_ft")
+            model_value = config.get("model", "htdemucs")
+            self._set_radio_button(self.model.buttons, model_value, "htdemucs")
 
             # 设备
             device_value = config.get("device", "auto")
@@ -275,7 +281,7 @@ class SettingsTab(QWidget):
             self._set_radio_button(self.whisperx_size.buttons, whisperx_size_value, "large")
 
             # 批处理大小
-            self.batch_size.setValue(config.get("batch_size", 32))
+            self.batch_size.setValue(config.get("batch_size", 4))
 
             # 分离多个说话人
             separate_speakers_value = config.get("separate_speakers", True)
@@ -340,7 +346,7 @@ class SettingsTab(QWidget):
             self.max_retries.setValue(config.get("max_retries", 3))
 
         except Exception as e:
-            QMessageBox.warning(self, "配置加载错误", f"加载配置时出错: {str(e)}")
+            QMessageBox.warning(self, "Lỗi tải cấu hình", f"Có lỗi khi tải cấu hình: {str(e)}")
 
     def _set_radio_button(self, buttons, value, default_value):
         """辅助方法：安全地设置单选按钮值"""
@@ -373,13 +379,13 @@ class SettingsTab(QWidget):
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
 
-            QMessageBox.information(self, "保存成功", f"配置已保存到 {config_path}")
+            QMessageBox.information(self, "Lưu thành công", f"Cấu hình đã được lưu vào {config_path}")
 
             # 发送配置变更信号
             self.config_changed.emit(config)
 
         except Exception as e:
-            QMessageBox.critical(self, "保存失败", f"保存配置时出错: {str(e)}")
+            QMessageBox.critical(self, "Lưu thất bại", f"Có lỗi khi lưu cấu hình: {str(e)}")
 
     def load_config(self):
         """从JSON文件加载配置"""
@@ -392,30 +398,30 @@ class SettingsTab(QWidget):
                     config = json.load(f)
                 self.apply_config(config)
         except Exception as e:
-            QMessageBox.warning(self, "加载配置失败", f"加载配置时出错: {str(e)}")
+            QMessageBox.warning(self, "Tải cấu hình thất bại", f"Có lỗi khi tải cấu hình: {str(e)}")
 
     def reset_config(self):
-        """重置配置为默认值"""
-        if QMessageBox.question(self, "确认重置", "确定要重置所有配置到默认值吗？") == QMessageBox.Yes:
+        """Đặt lại cấu hình về mặc định"""
+        if QMessageBox.question(self, "Xác nhận đặt lại", "Bạn có chắc chắn muốn đặt lại tất cả cấu hình về mặc định không?") == QMessageBox.Yes:
             # 应用默认配置
             default_config = {
                 "video_folder": "videos",
                 "resolution": "1080p",
                 "video_count": 5,
-                "model": "htdemucs_ft",
+                "model": "htdemucs",
                 "device": "auto",
-                "shifts": 5,
+                "shifts": 1,
                 "asr_model": "WhisperX",
                 "whisperx_size": "large",
-                "batch_size": 32,
+                "batch_size": 2,
                 "separate_speakers": True,
                 "min_speakers": None,
                 "max_speakers": None,
                 "translation_method": "LLM",
-                "target_language_translation": "简体中文",
+                "target_language_translation": "Tiếng Việt",
                 "tts_method": "EdgeTTS",
-                "target_language_tts": "中文",
-                "edge_tts_voice": "zh-CN-XiaoxiaoNeural",
+                "target_language_tts": "Tiếng Việt",
+                "edge_tts_voice": "vi-VN-HoaiMyNeural",
                 "add_subtitles": True,
                 "speed_factor": 1.00,
                 "frame_rate": 30,
@@ -427,4 +433,4 @@ class SettingsTab(QWidget):
                 "max_retries": 3
             }
             self.apply_config(default_config)
-            QMessageBox.information(self, "重置成功", "所有配置已重置为默认值")
+            QMessageBox.information(self, "Đặt lại thành công", "Tất cả cấu hình đã được đặt lại về giá trị mặc định")

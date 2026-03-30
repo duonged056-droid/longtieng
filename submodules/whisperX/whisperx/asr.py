@@ -267,7 +267,8 @@ def load_model(whisper_arch,
                model : Optional[WhisperModel] = None,
                task="transcribe",
                download_root=None,
-               threads=4):
+               threads=4,
+               use_auth_token=None):
     '''Load a Whisper model for inference.
     Args:
         whisper_arch: str - The name of the Whisper model to load.
@@ -344,7 +345,7 @@ def load_model(whisper_arch,
     if vad_model is not None:
         vad_model = vad_model
     else:
-        vad_model = load_vad_model(torch.device(device), use_auth_token=None, **default_vad_options)
+        vad_model = load_vad_model(torch.device(device), use_auth_token=use_auth_token, **default_vad_options)
 
     return FasterWhisperPipeline(
         model=model,

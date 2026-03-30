@@ -15,47 +15,64 @@ from .cn_tx import TextNorm
 from audiostretchy.stretch import stretch_audio
 normalizer = TextNorm()
 def preprocess_text(text):
-    text = text.replace('AI', '人工智能')
+    # Basic text cleaning/preprocessing before TTS
+    text = text.replace('AI', 'AI')
     text = re.sub(r'(?<!^)([A-Z])', r' \1', text)
     text = normalizer(text)
-    # 使用正则表达式在字母和数字之间插入空格
+    # Insert space between letters and numbers using regex
     text = re.sub(r'(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=[a-zA-Z])', ' ', text)
     return text
     
     
 def adjust_audio_length(wav_path, desired_length, sample_rate = 24000, min_speed_factor = 0.6, max_speed_factor = 1.1):
     try:
-        wav, sample_rate = librosa.load(wav_path, sr=sample_rate)
+        if not os.path.exists(wav_path):
+            mp3_path = wav_path.replace('.wav', '.mp3')
+            if os.path.exists(mp3_path):
+                wav_path = mp3_path
+            else:
+                # If neither wav nor mp3 exists, generate silence
+                logger.error(f"Không tìm thấy file âm thanh: {wav_path}. Thay thế bằng khoảng lặng.")
+                return np.zeros((int(desired_length*sample_rate), )), desired_length
+
+        wav, sr_load = librosa.load(wav_path, sr=sample_rate)
+        current_length = len(wav)/sample_rate
+        speed_factor = max(
+            min(desired_length / current_length, max_speed_factor), min_speed_factor)
+        logger.info(f"Speed Factor {speed_factor}")
+        
+        target_path = wav_path.replace('.wav', f'_adjusted.wav').replace('.mp3', f'_adjusted.wav')
+        
+        stretch_audio(wav_path, target_path, ratio=speed_factor, sample_rate=sample_rate)
+        
+        if os.path.exists(target_path):
+            wav, sr_load = librosa.load(target_path, sr=sample_rate)
+            return wav[:int(desired_length*sample_rate)], desired_length
+        else:
+            logger.error(f"Stretched audio not created: {target_path}. Using silence.")
+            return np.zeros((int(desired_length*sample_rate), )), desired_length
+            
     except Exception as e:
-        if wav_path.endswith('.wav'):
-            wav_path = wav_path.replace('.wav', '.mp3')
-        wav, sample_rate = librosa.load(wav_path, sr=sample_rate)
-    current_length = len(wav)/sample_rate
-    speed_factor = max(
-        min(desired_length / current_length, max_speed_factor), min_speed_factor)
-    logger.info(f"Speed Factor {speed_factor}")
-    desired_length = current_length * speed_factor
-    if wav_path.endswith('.wav'):
-        target_path = wav_path.replace('.wav', f'_adjusted.wav')
-    elif wav_path.endswith('.mp3'):
-        target_path = wav_path.replace('.mp3', f'_adjusted.wav')
-    stretch_audio(wav_path, target_path, ratio=speed_factor, sample_rate=sample_rate)
-    wav, sample_rate = librosa.load(target_path, sr=sample_rate)
-    return wav[:int(desired_length*sample_rate)], desired_length
+        logger.error(f"Lỗi khi điều chỉnh độ dài âm thanh cho {wav_path}: {e}")
+        # Return silence on error to prevent pipeline crash
+        return np.zeros((int(desired_length*sample_rate), )), desired_length
 
 tts_support_languages = {
     # XTTS-v2 supports 17 languages: English (en), Spanish (es), French (fr), German (de), Italian (it), Portuguese (pt), Polish (pl), Turkish (tr), Russian (ru), Dutch (nl), Czech (cs), Arabic (ar), Chinese (zh-cn), Japanese (ja), Hungarian (hu), Korean (ko) Hindi (hi).
-    'xtts': ['中文', 'English', 'Japanese', 'Korean', 'French', 'Polish', 'Spanish'],
+    'xtts': ['Tiếng Việt', '中文', 'English', 'Japanese', 'Korean', 'French', 'Polish', 'Spanish'],
     'bytedance': [],
     'GPTSoVits': [],
-    'EdgeTTS': ['中文', 'English', 'Japanese', 'Korean', 'French', 'Polish', 'Spanish'],
+    'EdgeTTS': ['Tiếng Việt', '中文', 'English', 'Japanese', 'Korean', 'French', 'Polish', 'Spanish'],
     # zero_shot usage, <|zh|><|en|><|jp|><|yue|><|ko|> for Chinese/English/Japanese/Cantonese/Korean
-    'cosyvoice': ['中文', '粤语', 'English', 'Japanese', 'Korean', 'French'], 
+    'cosyvoice': ['Tiếng Việt', '中文', '粤语', 'English', 'Japanese', 'Korean', 'French'], 
 }
 
-def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-XiaoxiaoNeural'):
+def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-XiaoxiaoNeural', progress_callback=None):
     assert method in ['xtts', 'bytedance', 'cosyvoice', 'EdgeTTS']
     transcript_path = os.path.join(folder, 'translation.json')
+    if not os.path.exists(transcript_path):
+        transcript_path = os.path.join(folder, 'transcript.json')
+        
     output_folder = os.path.join(folder, 'wavs')
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -66,7 +83,7 @@ def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-Xiaox
     for line in transcript:
         speakers.add(line['speaker'])
     num_speakers = len(speakers)
-    logger.info(f'Found {num_speakers} speakers')
+    logger.info(f'Tìm thấy {num_speakers} người nói')
 
     if target_language not in tts_support_languages[method]:
         logger.error(f'{method} does not support {target_language}')
@@ -74,8 +91,13 @@ def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-Xiaox
         
     full_wav = np.zeros((0, ))
     for i, line in enumerate(transcript):
+        if progress_callback:
+            percent = int((i / len(transcript)) * 100)
+            progress_callback(percent, f"Đang tạo giọng nói ({i+1}/{len(transcript)})")
+            
         speaker = line['speaker']
-        text = preprocess_text(line['translation'])
+        text = line.get('translation', line.get('text', ''))
+        text = preprocess_text(text)
         output_path = os.path.join(output_folder, f'{str(i).zfill(4)}.wav')
         speaker_wav = os.path.join(folder, 'SPEAKER', f'{speaker}.wav')
         # if num_speakers == 1:
@@ -106,9 +128,11 @@ def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-Xiaox
         full_wav = np.concatenate((full_wav, wav))
         line['end'] = start + length
         
+    if progress_callback: progress_callback(95, "Đang trộn âm và hậu xử lý...")
     vocal_wav, sr = librosa.load(os.path.join(folder, 'audio_vocals.wav'), sr=24000)
     full_wav = full_wav / np.max(np.abs(full_wav)) * np.max(np.abs(vocal_wav))
-    save_wav(full_wav, os.path.join(folder, 'audio_tts.wav'))
+    audio_tts_wav = os.path.join(folder, 'audio_tts.wav')
+    save_wav(full_wav, audio_tts_wav)
     with open(transcript_path, 'w', encoding='utf-8') as f:
         json.dump(transcript, f, indent=2, ensure_ascii=False)
     
@@ -117,27 +141,71 @@ def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-Xiaox
     len_instruments_wav = len(instruments_wav)
     
     if len_full_wav > len_instruments_wav:
-        # 如果 full_wav 更长，将 instruments_wav 延伸到相同长度
+        # If full_wav is longer, pad instruments_wav to match length
         instruments_wav = np.pad(
             instruments_wav, (0, len_full_wav - len_instruments_wav), mode='constant')
     elif len_instruments_wav > len_full_wav:
-        # 如果 instruments_wav 更长，将 full_wav 延伸到相同长度
+        # If instruments_wav is longer, pad full_wav to match length
         full_wav = np.pad(
             full_wav, (0, len_instruments_wav - len_full_wav), mode='constant')
     combined_wav = full_wav + instruments_wav
-    # combined_wav /= np.max(np.abs(combined_wav))
-    save_wav_norm(combined_wav, os.path.join(folder, 'audio_combined.wav'))
-    logger.info(f'Generated {os.path.join(folder, "audio_combined.wav")}')
-    return os.path.join(folder, 'audio_combined.wav'), os.path.join(folder, 'audio.wav')
+    # Combined with normalization
+    audio_combined_wav = os.path.join(folder, 'audio_combined.wav')
+    save_wav_norm(combined_wav, audio_combined_wav)
+    
+    # Export MP3 as requested
+    import subprocess
+    audio_tts_mp3 = os.path.join(folder, 'audio_tts.mp3')
+    audio_combined_mp3 = os.path.join(folder, 'audio_combined.mp3')
+    
+    try:
+        logger.info("Converting synthesized audio to MP3...")
+        subprocess.run(['ffmpeg', '-y', '-i', audio_tts_wav, '-acodec', 'libmp3lame', '-ab', '192k', audio_tts_mp3], check=True, capture_output=True)
+        subprocess.run(['ffmpeg', '-y', '-i', audio_combined_wav, '-acodec', 'libmp3lame', '-ab', '192k', audio_combined_mp3], check=True, capture_output=True)
+        logger.info(f"Full MP3 exported: {audio_tts_mp3} and {audio_combined_mp3}")
+    except Exception as e:
+        logger.warning(f"Failed to export MP3 using ffmpeg: {e}")
 
-def generate_all_wavs_under_folder(root_folder, method, target_language='中文', voice = 'zh-CN-XiaoxiaoNeural'):
+    logger.info(f'Đã tạo tệp âm thanh: {audio_combined_wav}')
+    if progress_callback: progress_callback(100, "Lồng tiếng hoàn tất")
+    return audio_combined_wav, os.path.join(folder, 'audio.wav')
+
+def generate_all_wavs_under_folder(root_folder, method, target_language='中文', voice = 'zh-CN-XiaoxiaoNeural', progress_callback=None):
     wav_combined, wav_ori = None, None
+    
+    # Count directories matching criteria
+    target_dirs = []
     for root, dirs, files in os.walk(root_folder):
-        if 'translation.json' in files and 'audio_combined.wav' not in files:
-            wav_combined, wav_ori = generate_wavs(method, root, target_language, voice)
-        elif 'audio_combined.wav' in files:
-            wav_combined, wav_ori = os.path.join(root, 'audio_combined.wav'), os.path.join(root, 'audio.wav')
-            logger.info(f'Wavs already generated in {root}')
+        target_file = None
+        if 'translation.json' in files:
+            target_file = 'translation.json'
+        elif 'transcript.json' in files:
+            target_file = 'transcript.json'
+            
+        if target_file and 'audio_combined.wav' not in files:
+            target_dirs.append((root, target_file))
+            
+    total_dirs = len(target_dirs)
+    if total_dirs == 0:
+        logger.info(f"Không tìm thấy file cần lồng tiếng.")
+        # Re-check existing files
+        for root, dirs, files in os.walk(root_folder):
+            if 'audio_combined.wav' in files:
+                wav_combined, wav_ori = os.path.join(root, 'audio_combined.wav'), os.path.join(root, 'audio.wav')
+                break
+        return f'No files to generate wavs', wav_combined, wav_ori
+
+    for i, (root, target_file) in enumerate(target_dirs):
+        def sub_callback(p, msg):
+            if progress_callback:
+                overall_p = int((i / total_dirs) * 100 + (p / total_dirs))
+                progress_callback(overall_p, f"[{i+1}/{total_dirs}] {msg}")
+                
+        wav_combined, wav_ori = generate_wavs(method, root, target_language, voice, progress_callback=sub_callback)
+        
+    if progress_callback:
+        progress_callback(100, "Hoàn tất tất cả nhiệm vụ lồng tiếng")
+        
     return f'Generated all wavs under {root_folder}', wav_combined, wav_ori
 
 if __name__ == '__main__':

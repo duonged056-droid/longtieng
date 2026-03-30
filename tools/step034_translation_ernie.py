@@ -9,20 +9,20 @@ access_token = None
 
 def get_access_token(api_key, secret_key):
     """
-    使用 API Key 和 Secret Key 获取access_token。
-    :param api_key: 应用的API Key
-    :param secret_key: 应用的Secret Key
+    Get access_token using API Key and Secret Key.
+    :param api_key: App's API Key
+    :param secret_key: App's Secret Key
     :return: access_token
     """
     url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={api_key}&client_secret={secret_key}"
     
     response = requests.post(url, headers={'Content-Type': 'application/json'})
     if response.status_code == 200:
-        logger.info("成功获取 access_token")
+        logger.info("Successfully obtained access_token")
         return response.json().get("access_token")
     else:
-        logger.error("获取 access_token 失败")
-        raise Exception("获取 access_token 失败")
+        logger.error("Failed to obtain access_token")
+        raise Exception("Failed to obtain access_token")
 
 def ernie_response(messages, system=''):
     global access_token

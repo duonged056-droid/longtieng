@@ -1,6 +1,6 @@
 import os
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QMessageBox)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QMessageBox, QScrollArea, QFileDialog)
 
 from ui_components import CustomSlider, RadioButtonGroup, VideoPlayer
 
@@ -16,56 +16,70 @@ class DownloadTab(QWidget):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
 
-        # 视频URL
+        # URL Video
         self.video_url = QLineEdit()
-        self.video_url.setPlaceholderText("请输入Youtube或Bilibili的视频、播放列表或频道的URL")
+        self.video_url.setPlaceholderText("Vui lòng nhập URL video, danh sách phát hoặc kênh từ Youtube hoặc Bilibili")
         self.video_url.setText("https://www.bilibili.com/video/BV1kr421M7vz/")
-        self.layout.addWidget(QLabel("视频URL"))
+        self.layout.addWidget(QLabel("URL Video"))
         self.layout.addWidget(self.video_url)
 
-        # 视频输出文件夹
+        # Thư mục đầu ra video
+        self.video_folder_layout = QHBoxLayout()
         self.video_folder = QLineEdit("videos")
-        self.layout.addWidget(QLabel("视频输出文件夹"))
-        self.layout.addWidget(self.video_folder)
+        self.btn_select_folder = QPushButton("📂 Chọn")
+        self.btn_select_folder.clicked.connect(self.select_download_folder)
+        self.video_folder_layout.addWidget(self.video_folder)
+        self.video_folder_layout.addWidget(self.btn_select_folder)
+        
+        self.layout.addWidget(QLabel("Thư mục đầu ra video"))
+        self.layout.addLayout(self.video_folder_layout)
 
-        # 分辨率
+    def select_download_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục đầu ra video", self.video_folder.text())
+        if folder:
+            self.video_folder.setText(folder)
+
+        # Độ phân giải
         self.resolution = RadioButtonGroup(
             ['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'],
-            "分辨率",
+            "Độ phân giải",
             '1080p'
         )
         self.layout.addWidget(self.resolution)
 
-        # 下载视频数量
-        self.video_count = CustomSlider(1, 100, 1, "下载视频数量", 5)
+        # Số lượng video tải xuống
+        self.video_count = CustomSlider(1, 100, 1, "Số lượng video tải xuống", 5)
         self.layout.addWidget(self.video_count)
 
-        # 执行按钮
-        self.run_button = QPushButton("开始下载")
+        # Nút thực hiện
+        self.run_button = QPushButton("Bắt đầu tải")
         self.run_button.clicked.connect(self.run_download)
         self.layout.addWidget(self.run_button)
 
-        # 状态显示
-        self.status_label = QLabel("准备就绪")
-        self.layout.addWidget(QLabel("下载状态:"))
+        # Hiển thị trạng thái
+        self.status_label = QLabel("Sẵn sàng")
+        self.layout.addWidget(QLabel("Trạng thái tải xuống:"))
         self.layout.addWidget(self.status_label)
 
-        # 视频播放器
-        self.video_player = VideoPlayer("示例视频")
+        # Trình phát video
+        self.video_player = VideoPlayer("Video mẫu")
         self.layout.addWidget(self.video_player)
 
-        # 下载信息
-        self.download_info = QLabel("下载信息将显示在这里")
-        self.layout.addWidget(QLabel("下载信息:"))
-        self.layout.addWidget(self.download_info)
+        # Thông tin tải xuống
+        self.download_info = QLabel("Thông tin tải xuống sẽ hiển thị ở đây")
+        self.layout.addWidget(QLabel("Thông tin tải xuống:"))
+        self.scroll_area_info = QScrollArea() # Add a scroll area for long info
+        self.scroll_area_info.setWidget(self.download_info)
+        self.scroll_area_info.setWidgetResizable(True)
+        self.layout.addWidget(self.scroll_area_info)
 
         self.setLayout(self.layout)
 
     def run_download(self):
-        # 这里应该调用原始的download_from_url函数
-        # 临时实现，实际应用中需要替换为真实的调用
-        self.status_label.setText("下载中...")
-        QMessageBox.information(self, "功能提示", "下载功能正在实现中...")
+        # Đây là nơi gọi hàm download_from_url gốc
+        # Triển khai tạm thời, trong ứng dụng thực tế cần thay thế bằng lời gọi thực
+        self.status_label.setText("Đang tải...")
+        QMessageBox.information(self, "Gợi ý tính năng", "Tính năng tải xuống đang được thực hiện...")
 
         # 实际应用中解除以下注释
 
@@ -81,4 +95,4 @@ class DownloadTab(QWidget):
                 self.video_player.set_video(video_path)
             self.download_info.setText(str(info))
         except Exception as e:
-            self.status_label.setText(f"下载失败: {str(e)}")
+            self.status_label.setText(f"Tải thất bại: {str(e)}")

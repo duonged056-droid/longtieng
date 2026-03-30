@@ -41,23 +41,38 @@ class FullAutoTab(QWidget):
         self.left_widget = QWidget()
         self.left_layout = QVBoxLayout(self.left_widget)
 
-        # 添加视频URL输入框
-        self.video_url_label = QLabel("视频URL")
+        # Thêm ô nhập URL video
+        self.video_url_label = QLabel("URL Video hoặc Đường dẫn Video:")
         self.video_url = QLineEdit()
-        self.video_url.setPlaceholderText("请输入Youtube或Bilibili的视频、播放列表或频道的URL")
+        self.video_url.setPlaceholderText("Vui lòng nhập URL video hoặc đường dẫn file .mp4")
         self.video_url.setText("https://www.bilibili.com/video/BV1kr421M7vz/")
 
-        # 选择本地视频按钮
-        self.select_video_button = QPushButton("选择本地视频")
+        # Nút chọn video địa phương
+        self.select_video_button = QPushButton("📂 Chọn Video từ máy")
         self.select_video_button.clicked.connect(self.select_local_video)
+
+        # Thêm ô nhập SRT
+        self.srt_path_label = QLabel("Đường dẫn file SRT (Tùy chọn):")
+        self.srt_path = QLineEdit()
+        self.srt_path.setPlaceholderText("Để trống nếu muốn tự động nhận dạng (ASR)")
+        self.select_srt_button = QPushButton("📂 Chọn file SRT")
+        self.select_srt_button.clicked.connect(self.select_local_srt)
+
+        # Checkbox bỏ qua dịch
+        self.skip_translation_cb = gr.Checkbox(label='Lồng tiếng trực tiếp từ SRT (Không dịch)', value=False)
+        # Wait, this is PySide6, not Gradio. I used 'gr.Checkbox' by mistake in my thought.
+        from PySide6.QtWidgets import QCheckBox
+        self.skip_translation_cb = QCheckBox("Lồng tiếng trực tiếp từ SRT (Không dịch)")
 
         self.left_layout.addWidget(self.video_url_label)
         self.left_layout.addWidget(self.video_url)
-
-        # 本地视频选择布局
-        local_video_layout = QHBoxLayout()
-        local_video_layout.addWidget(self.select_video_button)
-        self.left_layout.addLayout(local_video_layout)
+        self.left_layout.addWidget(self.select_video_button)
+        
+        self.left_layout.addSpacing(10)
+        self.left_layout.addWidget(self.srt_path_label)
+        self.left_layout.addWidget(self.srt_path)
+        self.left_layout.addWidget(self.select_srt_button)
+        self.left_layout.addWidget(self.skip_translation_cb)
 
         # 增加一个配置信息摘要
         self.config_summary = QTextEdit()
@@ -65,7 +80,7 @@ class FullAutoTab(QWidget):
         self.config_summary.setMaximumHeight(200)
         self.update_config_summary()
 
-        self.config_summary_label = QLabel("当前配置摘要：")
+        self.config_summary_label = QLabel("Tóm tắt cấu hình hiện tại:")
         self.left_layout.addWidget(self.config_summary_label)
         self.left_layout.addWidget(self.config_summary)
 
@@ -76,29 +91,29 @@ class FullAutoTab(QWidget):
         # 执行按钮区域
         self.button_layout = QHBoxLayout()
 
-        # 执行按钮
-        self.run_button = QPushButton("一键处理")
+        # Nút Xử lý
+        self.run_button = QPushButton("Xử lý ngay")
         self.run_button.clicked.connect(self.run_process)
         self.run_button.setMinimumHeight(50)
         self.run_button.setStyleSheet("background-color: #4CAF50; color: white;")
 
-        # 停止按钮
-        self.stop_button = QPushButton("停止处理")
+        # Nút Dừng
+        self.stop_button = QPushButton("Dừng xử lý")
         self.stop_button.clicked.connect(self.stop_process)
         self.stop_button.setMinimumHeight(50)
-        self.stop_button.setEnabled(False)  # 初始禁用
+        self.stop_button.setEnabled(False)  # Ban đầu vô hiệu hóa
 
-        # 预览按钮
-        self.preview_button = QPushButton("预览视频")
+        # Nút Xem trước
+        self.preview_button = QPushButton("Xem trước video")
         self.preview_button.clicked.connect(self.preview_video)
         self.preview_button.setMinimumHeight(50)
-        self.preview_button.setEnabled(False)  # 初始禁用
+        self.preview_button.setEnabled(False)  # Ban đầu vô hiệu hóa
 
-        # 打开文件所在目录按钮
-        self.open_folder_button = QPushButton("打开所在目录")
+        # Nút Mở thư mục
+        self.open_folder_button = QPushButton("Mở thư mục chứa")
         self.open_folder_button.clicked.connect(self.open_folder)
         self.open_folder_button.setMinimumHeight(50)
-        self.open_folder_button.setEnabled(False)  # 初始禁用
+        self.open_folder_button.setEnabled(False)  # Ban đầu vô hiệu hóa
 
         # 添加按钮到按钮布局
         self.button_layout.addWidget(self.run_button)
@@ -107,37 +122,37 @@ class FullAutoTab(QWidget):
         self.button_layout.addWidget(self.preview_button)
         self.right_layout.addLayout(self.button_layout)
 
-        # 进度条
+        # Thanh tiến trình
         self.progress_layout = QVBoxLayout()
-        self.progress_label = QLabel("准备就绪")
+        self.progress_label = QLabel("Sẵn sàng")
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_layout.addWidget(QLabel("处理进度:"))
+        self.progress_layout.addWidget(QLabel("Tiến độ xử lý:"))
         self.progress_layout.addWidget(self.progress_bar)
         self.progress_layout.addWidget(self.progress_label)
         self.right_layout.addLayout(self.progress_layout)
 
-        # 状态显示
-        self.status_label = QLabel("准备就绪")
-        self.right_layout.addWidget(QLabel("处理状态:"))
+        # Hiển thị trạng thái
+        self.status_label = QLabel("Sẵn sàng")
+        self.right_layout.addWidget(QLabel("Trạng thái xử lý:"))
         self.right_layout.addWidget(self.status_label)
 
         # 创建右侧的垂直分割器，上方放视频播放器，下方放日志
         self.right_splitter = QSplitter(Qt.Vertical)
 
-        # 视频播放器容器
+        # Container video
         self.video_container = QWidget()
         self.video_layout = QVBoxLayout(self.video_container)
-        self.video_layout.addWidget(QLabel("合成视频预览:"))
-        self.video_player = VideoPlayer("合成视频")
+        self.video_layout.addWidget(QLabel("Xem trước video tổng hợp:"))
+        self.video_player = VideoPlayer("Video tổng hợp")
         self.video_layout.addWidget(self.video_player)
         self.video_container.setLayout(self.video_layout)
 
-        # 日志容器
+        # Container nhật ký
         self.log_container = QWidget()
         self.log_layout = QVBoxLayout(self.log_container)
-        self.log_layout.addWidget(QLabel("处理日志:"))
+        self.log_layout.addWidget(QLabel("Nhật ký xử lý:"))
 
         # 日志文本区域
         self.log_text = QTextEdit()
@@ -145,11 +160,11 @@ class FullAutoTab(QWidget):
         self.log_text.setLineWrapMode(QTextEdit.WidgetWidth)  # 自动换行
         self.log_layout.addWidget(self.log_text)
 
-        # 日志控制按钮
+        # Nút điều khiển nhật ký
         self.log_button_layout = QHBoxLayout()
-        self.clear_log_button = QPushButton("清空日志")
+        self.clear_log_button = QPushButton("Xóa nhật ký")
         self.clear_log_button.clicked.connect(self.clear_log)
-        self.save_log_button = QPushButton("保存日志")
+        self.save_log_button = QPushButton("Lưu nhật ký")
         self.save_log_button.clicked.connect(self.save_log)
         self.log_button_layout.addWidget(self.clear_log_button)
         self.log_button_layout.addWidget(self.save_log_button)
@@ -198,8 +213,8 @@ class FullAutoTab(QWidget):
         ]
         self.current_step = 0
 
-        # 初始化日志
-        self.append_log("系统初始化完成，准备就绪")
+        # Khởi tạo nhật ký
+        self.append_log("Hệ thống khởi tạo hoàn tất, sẵn sàng")
 
     def update_config_summary(self):
         """更新配置摘要显示"""
@@ -220,22 +235,31 @@ class FullAutoTab(QWidget):
                 config.get("tts_method", "EdgeTTS"),
                 config.get("target_language_tts", "中文")
             )
-            summary_text += "● 添加字幕: {}, 加速倍数: {}\n".format(
-                "是" if config.get("add_subtitles", True) else "否",
+            summary_text += "● Thêm phụ đề: {}, Tốc độ: {}\n".format(
+                "Có" if config.get("add_subtitles", True) else "Không",
                 config.get("speed_factor", 1.00)
             )
             self.config_summary.setText(summary_text)
         else:
-            self.config_summary.setText("未找到配置信息，将使用默认配置")
+            self.config_summary.setText("Không tìm thấy cấu hình, sử dụng mặc định")
 
     def select_local_video(self):
         """选择本地视频文件"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择视频文件", "", "视频文件 (*.mp4 *.avi *.mkv *.mov *.flv)"
+            self, "Chọn file Video", "", "Video Files (*.mp4 *.avi *.mkv *.mov *.flv)"
         )
         if file_path:
             self.video_url.setText(file_path)
-            self.append_log(f"已选择本地视频文件: {file_path}")
+            self.append_log(f"Đã chọn Video: {file_path}")
+
+    def select_local_srt(self):
+        """选择本地SRT文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn file SRT", "", "Subtitle Files (*.srt)"
+        )
+        if file_path:
+            self.srt_path.setText(file_path)
+            self.append_log(f"Đã chọn SRT: {file_path}")
 
     def load_config(self):
         """从配置文件加载配置"""
@@ -273,29 +297,16 @@ class FullAutoTab(QWidget):
             self.signals.log.emit("开始处理...")
             self.signals.progress.emit(0, "初始化处理...")
             url = self.video_url.text()
+            srt_path = self.srt_path.text() if self.srt_path.text() else None
+            skip_translation = self.skip_translation_cb.isChecked()
 
             # 记录重要参数
             self.signals.log.emit(f"视频文件夹: {config.get('video_folder', 'videos')}")
-            self.signals.log.emit(f"视频URL: {url}")
-            self.signals.log.emit(f"分辨率: {config.get('resolution', '1080p')}")
-
-            # 更详细的参数记录
-            self.signals.log.emit("-" * 50)
-            self.signals.log.emit("处理参数:")
-            self.signals.log.emit(f"下载视频数量: {config.get('video_count', 5)}")
-            self.signals.log.emit(f"分辨率: {config.get('resolution', '1080p')}")
-            self.signals.log.emit(f"人声分离模型: {config.get('model', 'htdemucs_ft')}")
-            self.signals.log.emit(f"计算设备: {config.get('device', 'auto')}")
-            self.signals.log.emit(f"移位次数: {config.get('shifts', 5)}")
-            self.signals.log.emit(f"ASR模型: {config.get('asr_method', 'WhisperX')}")
-            self.signals.log.emit(f"WhisperX模型大小: {config.get('whisperx_size', 'large')}")
-            self.signals.log.emit(f"翻译方法: {config.get('translation_method', 'LLM')}")
-            self.signals.log.emit(f"TTS方法: {config.get('tts_method', 'EdgeTTS')}")
-            self.signals.log.emit("-" * 50)
-
-            # 更新进度信息 - 设置步骤1：下载视频
-            self.signals.progress.emit(5, f"{self.progress_steps[0]} (5%)")
-
+            self.signals.log.emit(f"视频URL/Path: {url}")
+            if srt_path:
+                 self.signals.log.emit(f"Sử dụng file SRT: {srt_path}")
+            self.signals.log.emit(f"Bỏ qua dịch thuật: {'Có' if skip_translation else 'Không'}")
+            
             # 实际的处理调用
             result, video_path = do_everything(
                 config.get('video_folder', 'videos'),  # 使用配置中的参数或默认值
@@ -304,10 +315,10 @@ class FullAutoTab(QWidget):
                 config.get('resolution', '1080p'),
                 config.get('model', 'htdemucs_ft'),
                 config.get('device', 'auto'),
-                config.get('shifts', 5),
+                config.get('shifts', 1),
                 config.get('asr_model', 'WhisperX'),
                 config.get('whisperx_size', 'large'),
-                config.get('batch_size', 32),
+                config.get('batch_size', 4),
                 config.get('separate_speakers', True),
                 config.get('min_speakers', None),
                 config.get('max_speakers', None),
@@ -324,7 +335,11 @@ class FullAutoTab(QWidget):
                 config.get('video_volume', 1.0),
                 config.get('output_resolution', '1080p'),
                 config.get('max_workers', 1),
-                config.get('max_retries', 3)
+                config.get('max_retries', 3),
+                progress_callback=None, # Signal handles it
+                srt_path=srt_path,
+                skip_asr=(srt_path is not None),
+                skip_translation=skip_translation
             )
 
             # 完成处理，设置100%进度

@@ -58,16 +58,16 @@ def generate_speaker_audio(folder, transcript):
         save_wav(audio, speaker_file_path)
 
 
-def transcribe_audio(method, folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=32, diarization=True,min_speakers=None, max_speakers=None):
+def transcribe_audio(method, folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=4, diarization=True,min_speakers=None, max_speakers=None):
     if os.path.exists(os.path.join(folder, 'transcript.json')):
-        logger.info(f'Transcript already exists in {folder}')
+        logger.info(f'Phụ đề đã tồn tại: {folder}')
         return True
     
     wav_path = os.path.join(folder, 'audio_vocals.wav')
     if not os.path.exists(wav_path):
         return False
     
-    logger.info(f'Transcribing {wav_path}')
+    logger.info(f'Đang nhận dạng giọng nói: {wav_path}')
     if device == 'auto':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
@@ -82,19 +82,39 @@ def transcribe_audio(method, folder, model_name: str = 'large', download_root='m
     transcript = merge_segments(transcript)
     with open(os.path.join(folder, 'transcript.json'), 'w', encoding='utf-8') as f:
         json.dump(transcript, f, indent=4, ensure_ascii=False)
-    logger.info(f'Transcribed {wav_path} successfully, and saved to {os.path.join(folder, "transcript.json")}')
+    logger.info(f'Nhận dạng giọng nói {wav_path} thành công, đã lưu vào {os.path.join(folder, "transcript.json")}')
     generate_speaker_audio(folder, transcript)
     return transcript
 
-def transcribe_all_audio_under_folder(folder, asr_method, whisper_model_name: str = 'large', device='auto', batch_size=32, diarization=False, min_speakers=None, max_speakers=None):
+def transcribe_all_audio_under_folder(folder, asr_method, whisper_model_name: str = 'large', device='auto', batch_size=4, diarization=False, min_speakers=None, max_speakers=None, progress_callback=None):
     transcribe_json = None
+    
+    # Count matching directories
+    target_dirs = []
     for root, dirs, files in os.walk(folder):
         if 'audio_vocals.wav' in files and 'transcript.json' not in files:
-            transcribe_json = transcribe_audio(asr_method, root, whisper_model_name, 'models/ASR/whisper', device, batch_size, diarization, min_speakers, max_speakers)
-        elif 'transcript.json' in files:
-            transcribe_json = json.load(open(os.path.join(root, 'transcript.json'), 'r', encoding='utf-8'))
+            target_dirs.append(root)
+    
+    total_dirs = len(target_dirs)
+    if total_dirs == 0:
+        logger.info(f"Không tìm thấy file âm thanh cần nhận dạng.")
+        # Re-scan for existing transcript.json if no new files
+        for root, dirs, files in os.walk(folder):
+            if 'transcript.json' in files:
+                transcribe_json = json.load(open(os.path.join(root, 'transcript.json'), 'r', encoding='utf-8'))
+                break
+        return f'No audio files to transcribe', transcribe_json
 
-            # logger.info(f'Transcript already exists in {root}')
+    for i, root in enumerate(target_dirs):
+        if progress_callback:
+            percent = int((i / total_dirs) * 100)
+            progress_callback(percent, f"Đang nhận dạng tiếng ({i+1}/{total_dirs}): {os.path.basename(root)}")
+            
+        transcribe_json = transcribe_audio(asr_method, root, whisper_model_name, 'models/ASR/whisper', device, batch_size, diarization, min_speakers, max_speakers)
+    
+    if progress_callback:
+        progress_callback(100, "Nhận dạng giọng nói hoàn tất")
+        
     return f'Transcribed all audio under {folder}', transcribe_json
 
 if __name__ == '__main__':

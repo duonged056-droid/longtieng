@@ -9,7 +9,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 
 class CustomSlider(QWidget):
-    """整数值滑块控件"""
+    """Thanh trượt giá trị nguyên"""
 
     def __init__(self, minimum, maximum, step, label, value, parent=None):
         super().__init__(parent)
@@ -46,7 +46,7 @@ class CustomSlider(QWidget):
 
 
 class FloatSlider(QWidget):
-    """浮点值滑块控件"""
+    """Thanh trượt giá trị thực"""
 
     def __init__(self, minimum, maximum, step, label, value, parent=None):
         super().__init__(parent)
@@ -85,7 +85,7 @@ class FloatSlider(QWidget):
 
 
 class RadioButtonGroup(QWidget):
-    """单选按钮组控件"""
+    """Nhóm nút chọn một (Radio Buttons)"""
 
     def __init__(self, options, label, default_value, parent=None):
         super().__init__(parent)
@@ -114,7 +114,7 @@ class RadioButtonGroup(QWidget):
 
 
 class AudioSelector(QWidget):
-    """音频文件选择控件"""
+    """Chọn tệp âm thanh"""
 
     def __init__(self, label, parent=None):
         super().__init__(parent)
@@ -125,7 +125,7 @@ class AudioSelector(QWidget):
 
         self.file_layout = QHBoxLayout()
         self.file_path = QLineEdit()
-        self.browse_button = QPushButton("浏览...")
+        self.browse_button = QPushButton("Duyệt...")
         self.browse_button.clicked.connect(self.browse_file)
 
         self.file_layout.addWidget(self.file_path)
@@ -135,7 +135,7 @@ class AudioSelector(QWidget):
         self.setLayout(self.layout)
 
     def browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择音频文件", "", "音频文件 (*.mp3 *.wav *.ogg)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Chọn tệp âm thanh", "", "Tệp âm thanh (*.mp3 *.wav *.ogg)")
         if file_path:
             self.file_path.setText(file_path)
 
@@ -144,7 +144,7 @@ class AudioSelector(QWidget):
 
 
 class VideoPlayer(QWidget):
-    """改进的视频播放控件"""
+    """Trình phát video nâng cao"""
 
     def __init__(self, label, parent=None):
         super().__init__(parent)
@@ -178,23 +178,23 @@ class VideoPlayer(QWidget):
 
         # 创建控制部件
         self.controls_layout = QHBoxLayout()
-        self.play_button = QPushButton("播放")
+        self.play_button = QPushButton("Phát")
         self.play_button.clicked.connect(self.play_pause)
 
-        # 添加暂停和停止按钮
-        self.stop_button = QPushButton("停止")
+        # Thêm nút tạm dừng và dừng
+        self.stop_button = QPushButton("Dừng")
         self.stop_button.clicked.connect(self.stop_video)
 
-        # 状态标签
-        self.status_label = QLabel("就绪")
+        # Nhãn trạng thái
+        self.status_label = QLabel("Sẵn sàng")
 
         # 组装控制栏
         self.controls_layout.addWidget(self.play_button)
         self.controls_layout.addWidget(self.stop_button)
 
-        # 添加音量控制
+        # Thêm điều khiển âm lượng
         volume_layout = QHBoxLayout()
-        volume_layout.addWidget(QLabel("音量:"))
+        volume_layout.addWidget(QLabel("Âm lượng:"))
         volume_layout.addWidget(self.volume_slider)
 
         self.controls_layout.addLayout(volume_layout)
@@ -207,49 +207,49 @@ class VideoPlayer(QWidget):
         self.video_path = None
 
     def set_volume(self, volume):
-        # 转换音量范围从0-100到0.0-1.0
+        # Chuyển phạm vi âm lượng từ 0-100 thành 0.0-1.0
         self.audio_output.setVolume(volume / 100.0)
-        self.status_label.setText(f"音量: {volume}%")
+        self.status_label.setText(f"Âm lượng: {volume}%")
 
     def set_video(self, path):
-        """设置视频源"""
+        """Thiết lập nguồn video"""
         if not os.path.exists(path):
-            self.status_label.setText(f"错误: 文件不存在")
+            self.status_label.setText(f"Lỗi: Tệp không tồn tại")
             return
 
         self.video_path = path
         try:
-            # 使用QUrl构建文件路径
+            # Sử dụng QUrl để xây dựng đường dẫn tệp
             url = QUrl.fromLocalFile(os.path.abspath(path))
             self.media_player.setSource(url)
-            self.status_label.setText(f"已加载: {os.path.basename(path)}")
+            self.status_label.setText(f"Đã tải: {os.path.basename(path)}")
             self.play_button.setEnabled(True)
             self.stop_button.setEnabled(True)
         except Exception as e:
-            self.status_label.setText(f"错误: {str(e)}")
+            self.status_label.setText(f"Lỗi: {str(e)}")
 
     def play_pause(self):
-        """播放或暂停视频"""
+        """Phát hoặc tạm dừng video"""
         if not self.video_path:
-            self.status_label.setText("错误: 未加载视频")
+            self.status_label.setText("Lỗi: Chưa tải video")
             return
 
         if self.media_player.playbackState() == QMediaPlayer.PlayingState:
             self.media_player.pause()
-            self.play_button.setText("播放")
-            self.status_label.setText("已暂停")
+            self.play_button.setText("Phát")
+            self.status_label.setText("Đã tạm dừng")
         else:
             self.media_player.play()
-            self.play_button.setText("暂停")
-            self.status_label.setText("正在播放")
+            self.play_button.setText("Tạm dừng")
+            self.status_label.setText("Đang phát")
 
     def stop_video(self):
-        """停止视频播放"""
+        """Dừng phát video"""
         self.media_player.stop()
-        self.play_button.setText("播放")
-        self.status_label.setText("已停止")
+        self.play_button.setText("Phát")
+        self.status_label.setText("Đã dừng")
 
     def handle_error(self, error, error_string):
-        """处理媒体播放器错误"""
-        self.status_label.setText(f"播放错误: {error_string}")
+        """Xử lý lỗi trình phát đa phương tiện"""
+        self.status_label.setText(f"Lỗi phát lại: {error_string}")
         print(f"Video player error ({error}): {error_string}")

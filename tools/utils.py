@@ -15,6 +15,50 @@ def sanitize_filename(filename: str) -> str:
 
     return sanitized_filename
 
+def cleanup_folder(folder_path):
+    """
+    Clean up intermediate files after dubbing is complete.
+    """
+    import shutil
+    import os
+    from loguru import logger
+
+    logger.info(f"Đang dọn dẹp các tệp tạm trong: {folder_path}")
+
+    # 1. Remove temporary directories
+    temp_dirs = ['wavs', 'SPEAKER']
+    for d in temp_dirs:
+        dir_path = os.path.join(folder_path, d)
+        if os.path.exists(dir_path):
+            try:
+                shutil.rmtree(dir_path)
+                logger.info(f"Đã xóa thư mục: {d}")
+            except Exception as e:
+                logger.error(f"Không thể xóa thư mục {d}: {e}")
+
+    # 2. Remove intermediate files (keep only final MP3/Video outputs)
+    temp_files = [
+        'transcript.json', 
+        'summary.json', 
+        'translation.json', 
+        'subtitles.srt',
+        'audio_vocals.wav',
+        'audio_instruments.wav',
+        'download.mp4',
+        'audio_combined.wav', # Keep MP3, remove WAV for space efficiency
+        'audio_tts.wav'
+    ]
+    
+    for f in temp_files:
+        file_path = os.path.join(folder_path, f)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Đã xóa tệp: {f}")
+            except Exception as e:
+                logger.error(f"Không thể xóa tệp {f}: {e}")
+
+    logger.info("Cleanup completed.")
 
 def save_wav(wav: np.ndarray, output_path: str, sample_rate=24000):
     # wav_norm = wav * (32767 / max(0.01, np.max(np.abs(wav))))
@@ -96,3 +140,28 @@ SUPPORT_VOICE = ['zu-ZA-ThembaNeural', 'zu-ZA-ThandoNeural',  'zh-TW-YunJheNeura
     'ar-KW-NouraNeural', 'ar-KW-FahedNeural', 'ar-JO-TaimNeural', 'ar-JO-SanaNeural', 'ar-IQ-RanaNeural', 'ar-IQ-BasselNeural', 
     'ar-EG-ShakirNeural', 'ar-EG-SalmaNeural', 'ar-DZ-IsmaelNeural', 'ar-DZ-AminaNeural', 'ar-BH-LailaNeural', 'ar-BH-AliNeural', 
     'ar-AE-HamdanNeural', 'ar-AE-FatimaNeural', 'am-ET-MekdesNeural', 'am-ET-AmehaNeural', 'af-ZA-WillemNeural', 'af-ZA-AdriNeural']
+
+def srt_to_json(srt_path, output_path=None):
+    import pysrt
+    import json
+    import os
+    subs = pysrt.open(srt_path, encoding='utf-8')
+    transcript = []
+    for sub in subs:
+        start_seconds = sub.start.hours * 3600 + sub.start.minutes * 60 + sub.start.seconds + sub.start.milliseconds / 1000.0
+        end_seconds = sub.end.hours * 3600 + sub.end.minutes * 60 + sub.end.seconds + sub.end.milliseconds / 1000.0
+        text_content = sub.text.replace('\n', ' ')
+        transcript.append({
+            'text': text_content,
+            'translation': text_content,  # Initialize translation with original text
+            'start': round(start_seconds, 3),
+            'end': round(end_seconds, 3),
+            'speaker': 'SPEAKER_00'  # Default speaker if not specified
+        })
+    
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(transcript, f, indent=4, ensure_ascii=False)
+            
+    return transcript

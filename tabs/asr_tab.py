@@ -1,6 +1,5 @@
-import os
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit,
-                               QScrollArea, QComboBox, QCheckBox, QPushButton, QMessageBox)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QScrollArea, QComboBox, QCheckBox, QPushButton, QMessageBox, QFileDialog)
 
 from ui_components import CustomSlider, RadioButtonGroup
 
@@ -22,55 +21,82 @@ class ASRTab(QWidget):
         self.scroll_widget = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_widget)
 
-        # 视频文件夹
+        # Thư mục video
+        self.video_folder_layout = QHBoxLayout()
         self.video_folder = QLineEdit("videos")
-        self.scroll_layout.addWidget(QLabel("视频文件夹"))
-        self.scroll_layout.addWidget(self.video_folder)
+        self.btn_select_folder = QPushButton("📂 Chọn")
+        self.btn_select_folder.clicked.connect(self.select_asr_folder)
+        self.video_folder_layout.addWidget(self.video_folder)
+        self.video_folder_layout.addWidget(self.btn_select_folder)
+        
+        self.scroll_layout.addWidget(QLabel("Thư mục video"))
+        self.scroll_layout.addLayout(self.video_folder_layout)
 
-        # ASR模型选择
+        # File video lẻ
+        self.video_file_layout = QHBoxLayout()
+        self.video_file = QLineEdit()
+        self.btn_select_file = QPushButton("🎬 Chọn file lẻ")
+        self.btn_select_file.clicked.connect(self.select_asr_file)
+        self.video_file_layout.addWidget(self.video_file)
+        self.video_file_layout.addWidget(self.btn_select_file)
+        
+        self.scroll_layout.addWidget(QLabel("Hoặc chọn file Video cục bộ"))
+        self.scroll_layout.addLayout(self.video_file_layout)
+
+    def select_asr_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục video", self.video_folder.text())
+        if folder:
+            self.video_folder.setText(folder)
+
+    def select_asr_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Chọn file video", "", "Video Files (*.mp4 *.avi *.mkv);;All Files (*)")
+        if file_path:
+            self.video_file.setText(file_path)
+
+        # Chọn mô hình ASR
         self.asr_model = QComboBox()
         self.asr_model.addItems(['WhisperX', 'FunASR'])
-        self.scroll_layout.addWidget(QLabel("ASR模型选择"))
+        self.scroll_layout.addWidget(QLabel("Chọn mô hình ASR"))
         self.scroll_layout.addWidget(self.asr_model)
 
-        # WhisperX模型大小
-        self.whisperx_size = RadioButtonGroup(['large', 'medium', 'small', 'base', 'tiny'], "WhisperX模型大小", 'large')
+        # Kích thước mô hình WhisperX
+        self.whisperx_size = RadioButtonGroup(['large', 'medium', 'small', 'base', 'tiny'], "Kích thước mô hình WhisperX", 'large')
         self.scroll_layout.addWidget(self.whisperx_size)
 
-        # 计算设备
-        self.device = RadioButtonGroup(['auto', 'cuda', 'cpu'], "计算设备", 'auto')
+        # Thiết bị tính toán
+        self.device = RadioButtonGroup(['auto', 'cuda', 'cpu'], "Thiết bị tính toán", 'auto')
         self.scroll_layout.addWidget(self.device)
 
-        # 批处理大小
-        self.batch_size = CustomSlider(1, 128, 1, "批处理大小 Batch Size", 32)
+        # Batch Size
+        self.batch_size = CustomSlider(1, 128, 1, "Batch Size (Kích thước lô)", 4)
         self.scroll_layout.addWidget(self.batch_size)
 
-        # 分离多个说话人
-        self.separate_speakers = QCheckBox("分离多个说话人")
+        # Tách nhiều người nói
+        self.separate_speakers = QCheckBox("Tách nhiều người nói")
         self.separate_speakers.setChecked(True)
         self.scroll_layout.addWidget(self.separate_speakers)
 
-        # 最小说话人数
-        self.min_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "最小说话人数", None)
+        # Số người nói tối thiểu
+        self.min_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "Số người nói tối thiểu", None)
         self.scroll_layout.addWidget(self.min_speakers)
 
-        # 最大说话人数
-        self.max_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "最大说话人数", None)
+        # Số người nói tối đa
+        self.max_speakers = RadioButtonGroup([None, 1, 2, 3, 4, 5, 6, 7, 8, 9], "Số người nói tối đa", None)
         self.scroll_layout.addWidget(self.max_speakers)
 
-        # 执行按钮
-        self.run_button = QPushButton("开始识别")
+        # Nút thực hiện
+        self.run_button = QPushButton("Bắt đầu nhận dạng")
         self.run_button.clicked.connect(self.run_asr)
         self.scroll_layout.addWidget(self.run_button)
 
-        # 状态显示
-        self.status_label = QLabel("准备就绪")
-        self.scroll_layout.addWidget(QLabel("语音识别状态:"))
+        # Hiển thị trạng thái
+        self.status_label = QLabel("Sẵn sàng")
+        self.scroll_layout.addWidget(QLabel("Trạng thái nhận dạng giọng nói:"))
         self.scroll_layout.addWidget(self.status_label)
 
-        # 识别结果详情
-        self.result_detail = QLabel("识别结果将显示在这里")
-        self.scroll_layout.addWidget(QLabel("识别结果详情:"))
+        # Chi tiết kết quả nhận dạng
+        self.result_detail = QLabel("Kết quả nhận dạng sẽ hiển thị ở đây")
+        self.scroll_layout.addWidget(QLabel("Chi tiết kết quả nhận dạng:"))
         self.scroll_layout.addWidget(self.result_detail)
 
         # 设置滚动区域
@@ -79,16 +105,21 @@ class ASRTab(QWidget):
         self.setLayout(self.layout)
 
     def run_asr(self):
-        # 这里应该调用原始的transcribe_all_audio_under_folder函数
-        # 临时实现，实际应用中需要替换为真实的调用
-        self.status_label.setText("识别中...")
-        QMessageBox.information(self, "功能提示", "AI智能语音识别功能正在实现中...")
-
-        # 实际应用中解除以下注释
+        # Đây là nơi gọi hàm transcribe_all_audio_under_folder gốc
+        self.status_label.setText("Đang nhận dạng...")
+        
+        # Nếu có file lẻ được chọn, sao chép vào thư mục làm việc
+        v_file = self.video_file.text()
+        v_folder = self.video_folder.text()
+        
+        if v_file and os.path.exists(v_file):
+            if not os.path.exists(v_folder):
+                os.makedirs(v_folder, exist_ok=True)
+            shutil.copy(v_file, os.path.join(v_folder, os.path.basename(v_file)))
 
         try:
             status, result_json = transcribe_all_audio_under_folder(
-                self.video_folder.text(),
+                v_folder,
                 self.asr_model.currentText(),
                 self.whisperx_size.value(),
                 self.device.value(),
@@ -100,4 +131,4 @@ class ASRTab(QWidget):
             self.status_label.setText(status)
             self.result_detail.setText(str(result_json))
         except Exception as e:
-            self.status_label.setText(f"识别失败: {str(e)}")
+            self.status_label.setText(f"Nhận dạng thất bại: {str(e)}")

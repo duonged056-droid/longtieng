@@ -1,8 +1,8 @@
-import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QMessageBox, QCheckBox, QGroupBox)
+                               QPushButton, QMessageBox, QCheckBox, QGroupBox, QFileDialog)
 
 from ui_components import CustomSlider, RadioButtonGroup
+import shutil
 
 # 尝试导入实际的功能模块
 try:
@@ -16,53 +16,80 @@ class DemucsTab(QWidget):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
 
-        # 视频文件夹
+        # Thư mục video
+        self.video_folder_layout = QHBoxLayout()
         self.video_folder = QLineEdit("videos")
-        self.layout.addWidget(QLabel("视频文件夹"))
-        self.layout.addWidget(self.video_folder)
+        self.btn_select_folder = QPushButton("📂 Chọn")
+        self.btn_select_folder.clicked.connect(self.select_video_folder)
+        self.video_folder_layout.addWidget(self.video_folder)
+        self.video_folder_layout.addWidget(self.btn_select_folder)
+        
+        self.layout.addWidget(QLabel("Thư mục video"))
+        self.layout.addLayout(self.video_folder_layout)
 
-        # 模型
+        # File video lẻ
+        self.video_file_layout = QHBoxLayout()
+        self.video_file = QLineEdit()
+        self.btn_select_file = QPushButton("🎬 Chọn file lẻ")
+        self.btn_select_file.clicked.connect(self.select_video_file)
+        self.video_file_layout.addWidget(self.video_file)
+        self.video_file_layout.addWidget(self.btn_select_file)
+        
+        self.layout.addWidget(QLabel("Hoặc chọn file Video cục bộ"))
+        self.layout.addLayout(self.video_file_layout)
+
+    def select_video_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục video", self.video_folder.text())
+        if folder:
+            self.video_folder.setText(folder)
+
+    def select_video_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Chọn file video", "", "Video Files (*.mp4 *.avi *.mkv);;All Files (*)")
+        if file_path:
+            self.video_file.setText(file_path)
+
+        # Mô hình
         self.model = RadioButtonGroup(
             ['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q',
              'SIG'],
-            "模型",
+            "Mô hình",
             'htdemucs_ft'
         )
         self.layout.addWidget(self.model)
 
-        # 计算设备
-        self.device = RadioButtonGroup(['auto', 'cuda', 'cpu'], "计算设备", 'auto')
+        # Thiết bị tính toán
+        self.device = RadioButtonGroup(['auto', 'cuda', 'cpu'], "Thiết bị tính toán", 'auto')
         self.layout.addWidget(self.device)
 
-        # 显示进度条
-        self.show_progress = QCheckBox("显示进度条")
+        # Hiển thị thanh tiến trình
+        self.show_progress = QCheckBox("Hiển thị thanh tiến trình")
         self.show_progress.setChecked(True)
         self.layout.addWidget(self.show_progress)
 
-        # 移位次数
-        self.shifts = CustomSlider(0, 10, 1, "移位次数 Number of shifts", 5)
+        # Số lần dịch chuyển
+        self.shifts = CustomSlider(0, 10, 1, "Số lần dịch chuyển (Shifts)", 1)
         self.layout.addWidget(self.shifts)
 
-        # 执行按钮
-        self.run_button = QPushButton("开始分离")
+        # Nút thực hiện
+        self.run_button = QPushButton("Bắt đầu tách")
         self.run_button.clicked.connect(self.run_separation)
         self.layout.addWidget(self.run_button)
 
-        # 状态显示
-        self.status_label = QLabel("准备就绪")
-        self.layout.addWidget(QLabel("分离结果状态:"))
+        # Hiển thị trạng thái
+        self.status_label = QLabel("Sẵn sàng")
+        self.layout.addWidget(QLabel("Trạng thái kết quả tách:"))
         self.layout.addWidget(self.status_label)
 
-        # 音频播放控件
-        vocals_group = QGroupBox("人声音频")
+        # Điều khiển phát âm thanh
+        vocals_group = QGroupBox("Âm thanh giọng nói")
         vocals_layout = QVBoxLayout()
-        self.vocals_play_button = QPushButton("播放人声")
+        self.vocals_play_button = QPushButton("Phát giọng nói")
         vocals_layout.addWidget(self.vocals_play_button)
         vocals_group.setLayout(vocals_layout)
 
-        accompaniment_group = QGroupBox("伴奏音频")
+        accompaniment_group = QGroupBox("Âm thanh nhạc nền (Accompaniment)")
         accompaniment_layout = QVBoxLayout()
-        self.accompaniment_play_button = QPushButton("播放伴奏")
+        self.accompaniment_play_button = QPushButton("Phát nhạc nền")
         accompaniment_layout.addWidget(self.accompaniment_play_button)
         accompaniment_group.setLayout(accompaniment_layout)
 
@@ -74,16 +101,21 @@ class DemucsTab(QWidget):
         self.setLayout(self.layout)
 
     def run_separation(self):
-        # 这里应该调用原始的separate_all_audio_under_folder函数
-        # 临时实现，实际应用中需要替换为真实的调用
-        self.status_label.setText("分离中...")
-        QMessageBox.information(self, "功能提示", "人声分离功能正在实现中...")
-
-        # 实际应用中解除以下注释
+        # Đây là nơi gọi hàm separate_all_audio_under_folder gốc
+        self.status_label.setText("Đang tách...")
+        
+        # Nếu có file lẻ được chọn, sao chép vào thư mục làm việc
+        v_file = self.video_file.text()
+        v_folder = self.video_folder.text()
+        
+        if v_file and os.path.exists(v_file):
+            if not os.path.exists(v_folder):
+                os.makedirs(v_folder, exist_ok=True)
+            shutil.copy(v_file, os.path.join(v_folder, os.path.basename(v_file)))
 
         try:
             status, vocals_path, accompaniment_path = separate_all_audio_under_folder(
-                self.video_folder.text(),
+                v_folder,
                 self.model.value(),
                 self.device.value(),
                 self.show_progress.isChecked(),
@@ -95,4 +127,4 @@ class DemucsTab(QWidget):
             if accompaniment_path and os.path.exists(accompaniment_path):
                 self.accompaniment_play_button.setEnabled(True)
         except Exception as e:
-            self.status_label.setText(f"分离失败: {str(e)}")
+            self.status_label.setText(f"Tách thất bại: {str(e)}")

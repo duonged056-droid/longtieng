@@ -10,22 +10,22 @@ load_dotenv()
 
 def ollama_response(messages, model_name=None):
     """
-    使用Ollama API进行翻译处理
+    Handle translation using the Ollama API
 
-    参数:
-        messages: 与OpenAI格式兼容的消息列表
-        model_name: Ollama模型名称，如果为None则从环境变量获取
+    Args:
+        messages: List of messages compatible with OpenAI format
+        model_name: Name of the Ollama model, if None, get from environment variables
 
-    返回:
-        翻译结果文本
+    Returns:
+        Translation result text
     """
     model_name = os.getenv('OLLAMA_MODEL', 'qwen2.5:14b')
 
-    # 获取Ollama API的URL
+    # Get the Ollama API URL
     base_url = os.getenv('OLLAMA_API_BASE', 'http://localhost:11434/api')
     url = f"{base_url}/chat"
 
-    # 准备请求数据
+    # Prepare request data
     payload = {
         "model": model_name,
         "messages": messages,
@@ -33,40 +33,40 @@ def ollama_response(messages, model_name=None):
     }
 
     try:
-        logger.info(f"正在使用Ollama模型 {model_name} 进行翻译...")
+        logger.info(f"Đang sử dụng mô hình Ollama {model_name} để dịch...")
         response = requests.post(url, json=payload, timeout=120)
 
         if response.status_code == 200:
             result = response.json()
             return result.get('message', {}).get('content', '')
         else:
-            logger.error(f"请求Ollama API失败，状态码：{response.status_code}")
-            logger.error(f"错误详情：{response.text}")
-            raise Exception(f"请求Ollama API失败，状态码：{response.status_code}")
+            logger.error(f"Yêu cầu Ollama API thất bại, mã trạng thái: {response.status_code}")
+            logger.error(f"Chi tiết lỗi: {response.text}")
+            raise Exception(f"Yêu cầu Ollama API thất bại, mã trạng thái: {response.status_code}")
     except Exception as e:
-        logger.error(f"与Ollama通信过程中发生错误: {str(e)}")
+        logger.error(f"Đã xảy ra lỗi khi giao tiếp với Ollama: {str(e)}")
         raise
 
 
 def ollama_stream_response(messages, model_name=None):
     """
-    使用Ollama API进行流式翻译处理（适用于较长文本）
+    Handle streaming translation using the Ollama API (suitable for longer texts)
 
-    参数:
-        messages: 与OpenAI格式兼容的消息列表
-        model_name: Ollama模型名称，如果为None则从环境变量获取
+    Args:
+        messages: List of messages compatible with OpenAI format
+        model_name: Name of the Ollama model, if None, get from environment variables
 
-    返回:
-        完整的翻译结果文本
+    Returns:
+        Full translation result text
     """
     if model_name is None:
         model_name = os.getenv('OLLAMA_MODEL', 'qwen2.5:14b')
 
-    # 获取Ollama API的URL
+    # Get the Ollama API URL
     base_url = os.getenv('OLLAMA_API_BASE', 'http://localhost:11434/api')
     url = f"{base_url}/chat"
 
-    # 准备请求数据
+    # Prepare request data
     payload = {
         "model": model_name,
         "messages": messages,
@@ -74,11 +74,11 @@ def ollama_stream_response(messages, model_name=None):
     }
 
     try:
-        logger.info(f"正在使用Ollama模型 {model_name} 进行流式翻译...")
+        logger.info(f"Đang sử dụng mô hình Ollama {model_name} để dịch trực tuyến...")
         response = requests.post(url, json=payload, timeout=300, stream=True)
 
         if response.status_code == 200:
-            # 收集流式响应中的所有结果
+            # Collect all results from the streaming response
             full_response = ""
             for line in response.iter_lines():
                 if line:

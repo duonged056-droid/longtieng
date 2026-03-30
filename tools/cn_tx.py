@@ -47,7 +47,7 @@ ER_WHITELIST = '(儿女|儿子|儿孙|女儿|儿媳|妻儿|' \
     '佳儿佳妇|儿怜兽扰|儿无常父|儿不嫌母丑|儿行千里母担忧|儿大不由爷|苏乞儿)'
 ER_WHITELIST_PATTERN = re.compile(ER_WHITELIST)
 
-# 中文数字系统类型
+# Chinese numbering system types
 NUMBERING_TYPES = ['low', 'mid', 'high']
 
 CURRENCY_NAMES = '(人民币|美元|日元|英镑|欧元|马克|法郎|加拿大元|澳元|港币|先令|芬兰马克|爱尔兰镑|' \
@@ -291,7 +291,7 @@ CN_CHARS_COMMON = (
     '砰破砵砷砸砹砺砻砼砾础硁硅硇硊硌硍硎硐硒硔硕硖硗硙硚硝硪硫硬硭确硼硿碃碇碈碉碌碍'
     '碎碏碑碓碗碘碚碛碜碟碡碣碥碧碨碰碱碲碳碴碶碹碾磁磅磉磊磋磏磐磔磕磙磜磡磨磬磲磴磷'
     '磹磻礁礅礌礓礞礴礵示礼社祀祁祃祆祇祈祉祊祋祎祏祐祓祕祖祗祚祛祜祝神祟祠祢祥祧票祭'
-    '祯祲祷祸祺祼祾禀禁禄禅禊禋福禒禔禘禚禛禤禧禳禹禺离禽禾秀私秃秆秉秋种科秒秕秘租秣'
+    '祯祲祷祸祺祼祾禀禁禄禅禊禋福禒禔禘禚禛禤禧禳禹禹离禽禾秀私秃秆秉秋种科秒秕秘租秣'
     '秤秦秧秩秫秬秭积称秸移秽秾稀稂稃稆程稌稍税稑稔稗稙稚稞稠稣稳稷稹稻稼稽稿穄穆穑穗'
     '穙穜穟穰穴究穷穸穹空穿窀突窃窄窅窈窊窍窎窑窒窕窖窗窘窜窝窟窠窣窥窦窨窬窭窳窸窿立'
     '竑竖竘站竞竟章竣童竦竫竭端竹竺竽竿笃笄笆笈笊笋笏笑笔笕笙笛笞笠笤笥符笨笪笫第笮笯'
@@ -398,10 +398,10 @@ IN_VALID_CHARS = {c: True for c in VALID_CHARS}
 
 class ChineseChar(object):
     """
-    中文字符
-    每个字符对应简体和繁体,
-    e.g. 简体 = '负', 繁体 = '負'
-    转换时可转换为简体或繁体
+    Chinese character
+    Each character corresponds to simplified and traditional forms,
+    e.g. Simplified = '负', Traditional = '負'
+    Can be converted to simplified or traditional
     """
 
     def __init__(self, simplified, traditional):
@@ -418,9 +418,9 @@ class ChineseChar(object):
 
 class ChineseNumberUnit(ChineseChar):
     """
-    中文数字/数位字符
-    每个字符除繁简体外还有一个额外的大写字符
-    e.g. '陆' 和 '陸'
+    Chinese number/digit unit character
+    Each character has an extra big-writing form besides simplified/traditional
+    e.g. '陆' and '陸'
     """
 
     def __init__(self, power, simplified, traditional, big_s, big_t):
@@ -454,7 +454,7 @@ class ChineseNumberUnit(ChineseChar):
 
 class ChineseNumberDigit(ChineseChar):
     """
-    中文数字字符
+    Chinese number digit character
     """
 
     def __init__(self, value, simplified, traditional, big_s, big_t, alt_s=None, alt_t=None):
@@ -475,7 +475,7 @@ class ChineseNumberDigit(ChineseChar):
 
 class ChineseMath(ChineseChar):
     """
-    中文数位字符
+    Chinese digit character
     """
 
     def __init__(self, simplified, traditional, symbol, expression=None):
@@ -491,14 +491,14 @@ CC, CNU, CND, CM = ChineseChar, ChineseNumberUnit, ChineseNumberDigit, ChineseMa
 
 class NumberSystem(object):
     """
-    中文数字系统
+    Chinese number system
     """
     pass
 
 
 class MathSymbol(object):
     """
-    用于中文数字系统的数学符号 (繁/简体), e.g.
+    Mathematical symbols for the Chinese number system (traditional/simplified), e.g.
     positive = ['正', '正']
     negative = ['负', '負']
     point = ['点', '點']
@@ -532,12 +532,12 @@ class MathSymbol(object):
 # ================================================================================ #
 def create_system(numbering_type=NUMBERING_TYPES[1]):
     """
-    根据数字系统类型返回创建相应的数字系统，默认为 mid
-    NUMBERING_TYPES = ['low', 'mid', 'high']: 中文数字系统类型
+    Return a corresponding number system based on the numbering type, defaulting to 'mid'.
+    NUMBERING_TYPES = ['low', 'mid', 'high']: Chinese number system types
         low:  '兆' = '亿' * '十' = $10^{9}$,  '京' = '兆' * '十', etc.
         mid:  '兆' = '亿' * '万' = $10^{12}$, '京' = '兆' * '万', etc.
         high: '兆' = '亿' * '亿' = $10^{16}$, '京' = '兆' * '兆', etc.
-    返回对应的数字系统
+    Returns the corresponding number system
     """
 
     # chinese number units of '亿' and larger
@@ -573,6 +573,9 @@ def create_system(numbering_type=NUMBERING_TYPES[1]):
 
 
 def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
+    """
+    Convert Chinese number string to numeric string.
+    """
 
     def get_symbol(char, system):
         for u in system.units:
@@ -662,6 +665,9 @@ def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
 def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
             traditional=False, alt_zero=False, alt_one=False, alt_two=True,
             use_zeros=True, use_units=True):
+    """
+    Convert numeric string to Chinese number string.
+    """
 
     def get_value(value_string, use_zeros=True):
 
@@ -762,7 +768,7 @@ def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
 # ================================================================================ #
 class Cardinal:
     """
-    CARDINAL类
+    CARDINAL class
     """
 
     def __init__(self, cardinal=None, chntext=None):
@@ -778,7 +784,7 @@ class Cardinal:
 
 class Digit:
     """
-    DIGIT类
+    DIGIT class
     """
 
     def __init__(self, digit=None, chntext=None):
@@ -794,7 +800,7 @@ class Digit:
 
 class TelePhone:
     """
-    TELEPHONE类
+    TELEPHONE class
     """
 
     def __init__(self, telephone=None, raw_chntext=None, chntext=None):

@@ -21,19 +21,13 @@ def load_funasr_model(device='auto'):
     logger.info(f'Loading FunASR model')
     t_start = time.time()
 
-    # 定义模型文件夹路径
+    # Define model folder paths
     model_path = "models/ASR/FunASR/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
     vad_model_path = "models/ASR/FunASR/speech_fsmn_vad_zh-cn-16k-common-pytorch"
     punc_model_path = "models/ASR/FunASR/punc_ct-transformer_cn-en-common-vocab471067-large"
     spk_model_path = "models/ASR/FunASR/speech_campplus_sv_zh-cn_16k-common"
  
-    # funasr_model = AutoModel(
-    #     model="paraformer-zh", # iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch  
-    #     vad_model="fsmn-vad",  # iic/speech_fsmn_vad_zh-cn-16k-common-pytorch
-    #     punc_model="ct-punc",  # iic/punc_ct-transformer_cn-en-common-vocab471067-large
-    #     spk_model="cam++",     # iic/speech_campplus_sv_zh-cn_16k-common
-    # )
-    # 加载模型，如果路径存在则使用本地路径，否则使用默认模型
+    # Load model, use local path if it exists, otherwise use default online model
     funasr_model = AutoModel(
         model=model_path if os.path.isdir(model_path) else "paraformer-zh",
         vad_model=vad_model_path if os.path.isdir(vad_model_path) else "fsmn-vad",

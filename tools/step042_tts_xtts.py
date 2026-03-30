@@ -78,6 +78,18 @@ def tts(text, output_path, speaker_wav, model_name="models/TTS/XTTS-v2", device=
             logger.warning(e)
 
 
+def release_xtts():
+    """Giải phóng tài nguyên XTTS để tiết kiệm VRAM."""
+    global model
+    if model is not None:
+        logger.info("Đang giải phóng tài nguyên XTTS...")
+        model = None
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("Đã giải phóng tài nguyên XTTS thành công.")
+
 if __name__ == '__main__':
     speaker_wav = r'videos/村长台钓加拿大/20240805 英文无字幕 阿里这小子在水城威尼斯发来问候/audio_vocals.wav'
     os.makedirs('playground', exist_ok=True)

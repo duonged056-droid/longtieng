@@ -1,6 +1,5 @@
-import os
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit,
-                               QComboBox, QMessageBox)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QComboBox, QMessageBox, QFileDialog)
 
 from ui_components import VideoPlayer
 
@@ -10,29 +9,40 @@ class LinlyTalkerTab(QWidget):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
 
-        # 视频文件夹
+        # Thư mục video
+        self.video_folder_layout = QHBoxLayout()
         self.video_folder = QLineEdit("videos")
-        self.layout.addWidget(QLabel("视频文件夹"))
-        self.layout.addWidget(self.video_folder)
+        self.btn_select_folder = QPushButton("📂 Chọn")
+        self.btn_select_folder.clicked.connect(self.select_talker_folder)
+        self.video_folder_layout.addWidget(self.video_folder)
+        self.video_folder_layout.addWidget(self.btn_select_folder)
+        
+        self.layout.addWidget(QLabel("Thư mục video"))
+        self.layout.addLayout(self.video_folder_layout)
 
-        # AI配音方式
+    def select_talker_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục video", self.video_folder.text())
+        if folder:
+            self.video_folder.setText(folder)
+
+        # Phương pháp AI dubbing
         self.talker_method = QComboBox()
         self.talker_method.addItems(['Wav2Lip', 'Wav2Lipv2', 'SadTalker'])
-        self.layout.addWidget(QLabel("AI配音方式"))
+        self.layout.addWidget(QLabel("Phương pháp AI dubbing"))
         self.layout.addWidget(self.talker_method)
 
-        # 施工中提示
-        construction_label = QLabel("施工中，请静候佳音 可参考 https://github.com/Kedreamix/Linly-Talker")
+        # Thông báo đang thi công
+        construction_label = QLabel("Đang thi công, vui lòng chờ... Có thể tham khảo https://github.com/Kedreamix/Linly-Talker")
         construction_label.setOpenExternalLinks(True)
         self.layout.addWidget(construction_label)
 
-        # 状态显示
-        self.status_label = QLabel("功能开发中")
-        self.layout.addWidget(QLabel("合成状态:"))
+        # Hiển thị trạng thái
+        self.status_label = QLabel("Tính năng đang phát triển")
+        self.layout.addWidget(QLabel("Trạng thái tổng hợp:"))
         self.layout.addWidget(self.status_label)
 
-        # 视频播放器
-        self.video_player = VideoPlayer("合成视频")
+        # Trình phát video
+        self.video_player = VideoPlayer("Video tổng hợp")
         self.layout.addWidget(self.video_player)
 
         self.setLayout(self.layout)
