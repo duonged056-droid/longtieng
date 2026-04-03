@@ -272,16 +272,28 @@ class BumYTCloneExactApp(ctk.CTk):
         self.chk_audio_edit.grid(row=2, column=1, padx=10, pady=5, sticky="w")
 
         # --- CARD 4: 🛠️ CÔNG CỤ HỖ TRỢ (Extra Tools) ---
-        card_tools = ctk.CTkFrame(top_frame, fg_color=B_FRAME, corner_radius=15)
+        card_tools = ctk.CTkFrame(top_frame, fg_color=B_FRAME, corner_radius=15, border_width=1, border_color="#333")
         card_tools.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(card_tools, text="🛠️ 4. Công Cụ Hỗ Trợ", font=ctk.CTkFont(size=15, weight="bold"), text_color="#aaa").pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(card_tools, text="🛠️ 4. Công Cụ Hỗ Trợ (Manual Tools)", font=ctk.CTkFont(size=14, weight="bold"), text_color="#aaa").pack(anchor="w", padx=15, pady=(10, 5))
         
-        t_row = ctk.CTkFrame(card_tools, fg_color="transparent")
-        t_row.pack(fill="x", padx=15, pady=10)
-        
-        ctk.CTkButton(t_row, text="🛡️ Làm Mờ Sub", width=150, fg_color="#2b2b2b", command=self.run_blur_process).pack(side="left", padx=5)
-        ctk.CTkButton(t_row, text="🎵 Tách Nhạc Lẻ", width=150, fg_color="#2b2b2b", command=self.run_separation).pack(side="left", padx=5)
-        ctk.CTkButton(t_row, text="📏 Chọn Vùng Mờ", width=150, fg_color=B_FRAME, border_width=1, command=self.pick_blur_roi).pack(side="left", padx=5)
+        # Row: Blur Tool
+        b_row = ctk.CTkFrame(card_tools, fg_color="transparent")
+        b_row.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(b_row, text="Blur:", width=60, anchor="w").pack(side="left")
+        self.entry_video_blur = ctk.CTkEntry(b_row, placeholder_text="Video cần làm mờ...")
+        self.entry_video_blur.pack(side="left", fill="x", expand=True, padx=5)
+        ctk.CTkButton(b_row, text="Mở...", width=80, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_video_blur, [("Video", "*.mp4 *.avi *.mkv")])).pack(side="left", padx=2)
+        ctk.CTkButton(b_row, text="📏 Vùng", width=70, fg_color=B_SIDEBAR, command=self.pick_blur_roi).pack(side="left", padx=2)
+        ctk.CTkButton(b_row, text="🛡️ Chạy Blur", width=120, fg_color=B_SUCCESS, font=ctk.CTkFont(weight="bold"), command=self.run_blur_process).pack(side="left", padx=5)
+
+        # Row: Separation Tool
+        s_row = ctk.CTkFrame(card_tools, fg_color="transparent")
+        s_row.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(s_row, text="Tách:", width=60, anchor="w").pack(side="left")
+        self.entry_sep_in = ctk.CTkEntry(s_row, placeholder_text="Video/Audio cần tách nhạc...")
+        self.entry_sep_in.pack(side="left", fill="x", expand=True, padx=5)
+        ctk.CTkButton(s_row, text="Mở...", width=80, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_sep_in, [("Media", "*.mp4 *.wav *.mp3")])).pack(side="left", padx=2)
+        ctk.CTkButton(s_row, text="🎵 Chạy Tách", width=120, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.run_separation).pack(side="left", padx=5)
 
         # -- MAIN START BUTTON --
         ctk.CTkButton(top_frame, text="🚀 BẮT ĐẦU CHUYỂN ĐỔI", height=70, fg_color=B_ACCENT, corner_radius=35, font=ctk.CTkFont(size=20, weight="bold"), command=self.run_tab3).pack(fill="x", padx=50, pady=(20, 10))
