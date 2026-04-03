@@ -75,7 +75,7 @@ class BumYTCloneExactApp(ctk.CTk):
         self.main_content.grid_rowconfigure(0, weight=1)
 
         # ==================== GLOBAL VARS ====================
-        self.out_dir = "capcut"
+        self.out_dir = "output"
         os.makedirs(self.out_dir, exist_ok=True)
         self.srt_vi_path = os.path.join(self.out_dir, "vi_output.srt")
         

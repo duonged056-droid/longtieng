@@ -46,33 +46,80 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        # Để xóa phụ đề "trùng màu nền" và "không bị nhòe/lem" (như ảnh bạn gửi):
-    # 1. delogo: Giúp lấy màu sắc trung bình của vùng xung quanh lấp vào (matching background color).
-    # 2. gblur (Gaussian Blur): Làm mịn vùng đó để tạo hiệu ứng mờ "sạch" (clean blur bar), không còn vết chữ.
-    # Ta dùng một chuỗi filter liên hoàn trong -vf (Video Filter) để không bị lỗi dấu ngoặc vuông.
-    
-    filter_val = f"delogo=x={args.x}:y={args.y}:w={args.w}:h={args.h},gblur=sigma=20:steps=2"
+        hw_accel = []
 
-    cmd = [
-        ffmpeg_cmd, "-y",
-    ] + hw_accel + [
-        "-i", args.video_in,
-        "-vf", filter_val,
-        "-map", "0:v",
-        "-map", "0:a?",
-        "-c:v", encoder,
-        "-preset", preset,
-        "-c:a", "copy",
-        "-loglevel", "error",
-        args.video_out
-    ]
+    # --- MIST BLUR (GAUSSIAN FADE) LOGIC ---
+    # Để đạt hiệu ứng "sương mù/mờ dần" (Mist) ở cạnh trên:
+    # 1. Ta tạo một vùng mờ đồng màu bằng delogo + gblur
+    # 2. Ta tạo một MASK (lớp mặt nạ) có độ dốc (gradient) từ đen (trong suốt) sang trắng (đậm)
+    # 3. Ta dùng maskedmerge để trộn vùng gốc và vùng mờ theo MASK này.
+
+    # Lấy kích thước video thực tế để tránh lỗi "Outside of frame"
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", args.video_in
+        ]
+        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
+        probe_data = json.loads(probe_res.stdout)
+        vw = probe_data['streams'][0]['width']
+        vh = probe_data['streams'][0]['height']
+        
+        # Tự động cắt (clip) tọa độ nếu vượt quá khung hình
+        real_x = max(0, min(args.x, vw - 1))
+        real_y = max(0, min(args.y, vh - 1))
+        real_w = max(1, min(args.w, vw - real_x))
+        real_h = max(1, min(args.h, vh - real_y))
+        
+        console.print(f"📏 Cân chỉnh vùng mờ: {real_w}x{real_h} tại {real_x},{real_y} (Video: {vw}x{vh})")
+    except:
+        real_x, real_y, real_w, real_h = args.x, args.y, args.w, args.h
+
+    # Đường dẫn file script tạm để tránh lỗi dấu ngoặc vuông [...]
+    script_path = os.path.join(os.path.dirname(args.video_out), "temp_filter_blur.txt")
+    
+    # Cấu trúc Filter Complex:
+    # 1. delogo trên TOÀN BỘ khung hình để nó có dữ liệu xung quanh (tránh lỗi outside or interpolation error)
+    # 2. crop + gblur để làm dải mờ mịn
+    # 3. overlay ngược lại
+    filter_script = (
+        f"[0:v] split [orig_full][src_full];\n"
+        f"[src_full] delogo=x={real_x}:y={real_y}:w={real_w}:h={real_h} [delogo_full];\n"
+        f"[delogo_full] crop={real_w}:{real_h}:{real_x}:{real_y}, gblur=sigma=30:steps=3 [blurred_part];\n"
+        f"nullsrc=size={real_w}x{real_h}, geq=lum='255*pow(Y/H, 3.5)' [mask_mist];\n"
+        f"[orig_full] crop={real_w}:{real_h}:{real_x}:{real_y} [original_part];\n"
+        f"[original_part][blurred_part][mask_mist] maskedmerge [merged_part];\n"
+        f"[orig_full][merged_part] overlay={real_x}:{real_y} [final_video_output]"
+    )
 
     try:
         os.makedirs(os.path.dirname(args.video_out), exist_ok=True)
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(filter_script)
+
+        cmd = [
+            ffmpeg_cmd, "-y",
+        ] + hw_accel + [
+            "-i", args.video_in,
+            "-filter_complex_script", script_path,
+            "-map", "[final_video_output]",
+            "-map", "0:a?",
+            "-c:v", encoder,
+            "-preset", preset,
+            "-c:a", "copy",
+            "-loglevel", "error",
+            args.video_out
+        ]
+
         subprocess.run(cmd, check=True)
-        console.print(f"[bold green]✨ XỬ LÝ GPU HOÀN TẤT![/bold green] File: {args.video_out}")
+        
+        # Cleanup
+        if os.path.exists(script_path): os.remove(script_path)
+            
+        console.print(f"[bold green]✨ XỬ LÝ MIST BLUR THÀNH CÔNG![/bold green]")
     except Exception as e:
         console.print(f"[bold red]Lỗi khi xử lý video qua FFmpeg:[/bold red] {str(e)}")
+        if os.path.exists(script_path): os.remove(script_path)
 
 if __name__ == "__main__":
     main()
