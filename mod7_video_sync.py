@@ -157,7 +157,7 @@ def main():
     console.print(f"[bold cyan]⚡ ĐANG ĐỒNG BỘ VIDEO & NHẠC NỀN (Smart Stretching - GPU)...[/bold cyan]")
     use_gpu = check_gpu(ffmpeg_cmd)
     
-    hw_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if use_gpu else []
+    hw_args = ["-hwaccel", "cuda"] if use_gpu else []
     encoder = "h264_nvenc" if use_gpu else "libx264"
     preset = "p4" if use_gpu else "fast"
     

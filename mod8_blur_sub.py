@@ -39,24 +39,19 @@ def main():
     use_gpu = check_gpu(ffmpeg_cmd)
     if use_gpu:
         console.print("[bold green]✅ GPU NVENC ĐÃ SẴN SÀNG![/bold green]")
-        # GPU Filter chain: hwupload_cuda -> crop/blur (if possible) OR just hybrid
-        # Thực tế combo nhanh nhất là: Decode GPU -> Blur CPU (vì filter blur GPU kén) -> Encode GPU
-        # Ở đây ta dùng filter boxblur/avgblur của FFmpeg cực nhanh so với MoviePy.
+        # SỬA LỖI: Bỏ -hwaccel_output_format cuda để filter CPU (boxblur) có thể làm việc với GPU decoder.
         encoder = "h264_nvenc"
         preset = "p4" 
-        hw_accel = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        hw_accel = ["-hwaccel", "cuda"]
     else:
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU (Sẽ chậm hơn).[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
         hw_accel = []
 
-    # Filter phức hợp:
-    # 1. Cắt vùng cần mờ (crop)
-    # 2. Làm mờ vùng đó (boxblur)
-    # 3. Đè vùng đã mờ lên video gốc (overlay)
-    # Lưu ý: Cần hwdownload nếu dùng filter cpu giữa chừng hoặc hwupload nếu dùng filter gpu.
-    # Đơn giản nhất và chạy được trên mọi FFmpeg full:
+    # Filter phức hợp: 
+    # [0:v] là video gốc -> trích xuất vùng -> làm mờ -> gán nhãn [blurred]
+    # Sau đó đè [blurred] lên video gốc [0:v] -> gán nhãn [outv]
     filter_chain = (
         f"[0:v]crop={args.w}:{args.h}:{args.x}:{args.y},boxblur={args.blur}:{args.blur}[blurred];"
         f"[0:v][blurred]overlay={args.x}:{args.y}[outv]"
@@ -68,10 +63,10 @@ def main():
         "-i", args.video_in,
         "-filter_complex", filter_chain,
         "-map", "[outv]",
-        "-map", "0:a?", # Copy audio nếu có
+        "-map", "0:a?",    # Copy audio nếu có
         "-c:v", encoder,
         "-preset", preset,
-        "-c:a", "copy", # Giữ nguyên audio cho nhanh
+        "-c:a", "copy",
         "-loglevel", "error",
         args.video_out
     ]
