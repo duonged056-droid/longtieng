@@ -88,18 +88,20 @@ def separate_audio(audio_path: str, vocal_out: str, bgm_out: str):
 def main():
     parser = argparse.ArgumentParser(description="Module 1: Tách âm thanh Vocals & BGM (LongTieng 2026 Edition)")
     parser.add_argument("--video_in", required=True, help="Video đầu vào")
-    parser.add_argument("--vocal_out", default="vocal.wav", help="File vocal đầu ra")
-    parser.add_argument("--bgm_out", default="bgm.wav", help="File nhạc nền đầu ra")
+    parser.add_argument("--output_dir", required=True, help="Thư mục đầu ra")
     
     args = parser.parse_args()
     
-    temp_audio = "temp_full_audio.wav"
+    os.makedirs(args.output_dir, exist_ok=True)
+    temp_audio = os.path.join(args.output_dir, "temp_full_audio.wav")
+    vocal_out = os.path.join(args.output_dir, "vocal_clean.wav")
+    bgm_out = os.path.join(args.output_dir, "bgm_clean.wav")
     
     try:
         # Bước 1: Trích xuất audio
         extract_audio(args.video_in, temp_audio)
         # Bước 2: Tách âm
-        separate_audio(temp_audio, args.vocal_out, args.bgm_out)
+        separate_audio(temp_audio, vocal_out, bgm_out)
     except Exception as e:
         console.print(f"[bold red]Lỗi Module 1:[/bold red] {str(e)}")
     finally:

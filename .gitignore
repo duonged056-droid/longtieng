@@ -164,3 +164,12 @@ models
 videos
 temp
 tmp
+ffmpeg-*/
+CapCut_Draft_*/
+*.bat
+*.exe
+*.zip
+*.7z
+outputs/
+capcap/
+capcut/

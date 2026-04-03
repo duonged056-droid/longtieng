@@ -45,3 +45,5 @@ dotenv
 loguru
 moviepy
 # ctranslate2==3.24.0
+customtkinter
+opencv-python

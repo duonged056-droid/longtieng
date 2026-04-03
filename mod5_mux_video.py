@@ -1,97 +1,87 @@
 import os
 import argparse
 import subprocess
+import torch
 from rich.console import Console
 
 console = Console()
 
-def mux_video(video_in, tts_in, bgm_in, srt_vi_in, blur_box, video_out, fps=30):
+def mux_video(video_in, tts_in, bgm_in, srt_vi_in, blur_box, video_out):
     """
-    Sử dụng 1 lệnh FFmpeg duy nhất để Render video thành phẩm.
+    Sử dụng FFmpeg -filter_complex để hoàn thiện video (GPU Accelerated).
     """
-    if not os.path.exists(video_in):
-        console.print(f"[bold red]Lỗi:[/bold red] Không tìm thấy video gốc: {video_in}")
+    if not all(os.path.exists(f) for f in [video_in, tts_in, srt_vi_in]):
+        console.print("[bold red]LỖI:[/bold red] Thiếu tệp đầu vào cho quá trình Muxing (video, tts, srt).")
         return
 
-    # Đường dẫn font Arial hỗ trợ tiếng Việt
-    font_path = "C:/Windows/Fonts/arial.ttf"
-    # Xử lý đường dẫn SRT đặc biệt cho FFmpeg filter trên Windows
-    escaped_srt = srt_vi_in.replace(':', '\\:').replace('\\', '/')
-    
-    # 1. Xây dựng Video Filter: Blur vùng sub cũ -> Gắn Hardsub mới
-    video_filter = "[0:v]"
-    
-    # Blur theo tọa đối (x,y,w,h)
-    if blur_box:
-        try:
-            x, y, w, h = blur_box.split(',')
-            video_filter += f"split[orig][v_blur];[v_blur]crop={w}:{h}:{x}:{y},boxblur=20:10[blurred];[orig][blurred]overlay={x}:{y}"
-        except Exception as e:
-            console.print(f"[yellow]Cảnh báo:[/yellow] Tọa độ blur_box sai định dạng. Bỏ qua bước blur. ({e})")
-            
-    # Gắn Hardsub
-    video_filter += f",subtitles='{escaped_srt}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2'"
-    
-    # 2. Xây dựng Audio Filter: Trộn TTS và BGM (BGM vol 0.3)
-    # [1:a] là TTS, [2:a] là BGM
-    audio_filter = "[1:a]volume=1.0[v_tts];[2:a]volume=0.3[v_bgm];[v_tts][v_bgm]amix=inputs=2:duration=first"
-    
-    # 3. Lệnh FFmpeg tổng hợp (Dùng NVIDIA NVENC nếu có)
+    has_bgm = os.path.exists(bgm_in)
+
+    # Bước 1: Video Filters (Chỉ giữ lại Blur nếu có, bỏ Subtitles)
+    video_filters = ""
+    if blur_box and blur_box != "none":
+        x, y, w, h = blur_box.split(",")
+        video_filters = f"boxblur=10:1:enable='between(t,0,99999)':x={x}:y={y}:w={w}:h={h}"
+
+    # Bước 2: Audio Filters (Mixing TTS + BGM)
+    if has_bgm:
+        audio_filters = "[1:a]volume=1.2[vocal];[2:a]volume=0.2[bgm];[vocal][bgm]amix=inputs=2:duration=longest[outa]"
+    else:
+        audio_filters = "[1:a]volume=1.2[outa]"
+
+    if video_filters:
+        v_stream = f"[0:v]{video_filters}[outv]"
+        v_map = "[outv]"
+    else:
+        v_stream = ""
+        v_map = "0:v"
+
+    # Lệnh FFmpeg tổng hợp
     cmd = [
         "ffmpeg", "-y",
         "-i", video_in,
-        "-i", tts_in,
-        "-i", bgm_in,
-        "-filter_complex", f"{video_filter};{audio_filter}",
-        "-map", f"[v]" if blur_box else "0:v", # Nếu không blur thì lấy gốc, nhưng ở đây filter video_filter luôn kết thúc bằng hardsub nên cần map
-        "-map", "[a]",
-        "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-b:v", "5M",
+        "-i", tts_in
+    ]
+    if has_bgm:
+        cmd += ["-i", bgm_in]
+        
+    filter_expr = f"{v_stream};{audio_filters}" if v_stream else audio_filters
+    
+    cmd += [
+        "-filter_complex", filter_expr,
+        "-map", v_map,
+        "-map", "[outa]",
+        "-c:v", "h264_nvenc", # Sử dụng NVIDIA GPU
+        "-preset", "p4",        # Cân bằng chất lượng/tốc độ
+        "-b:v", "5M",          # Bitrate 5Mbps cho chất lượng HD
         "-c:a", "aac", "-b:a", "192k",
-        "-r", str(fps),
         video_out
     ]
-    
-    # Nếu không dùng nvenc (đối với máy không có NVIDIA), đổi sang libx264
-    # Nhưng theo yêu cầu là tối ưu 2026 và máy user có RTX 3050 Ti nên h264_nvenc là chuẩn bài.
 
-    console.print(f"[bold blue]Đang Render video thành phẩm...[/bold blue]")
+    console.print(f"[bold cyan]>>> Đang khởi tạo Render bằng NVIDIA GPU (NVENC)...[/bold cyan]")
+    if blur_box:
+        console.print(f"[dim]Vùng Blur: {blur_box}[/dim]")
+
     try:
-        # Nếu lệnh trên bị lỗi map (do logic filter_complex phức tạp), ta fix map đơn giản hơn
-        # Gán nhãn cho output video filter
-        video_filter_final = f"{video_filter}[v_out]"
-        audio_filter_final = f"{audio_filter}[a_out]"
-        
-        cmd_fixed = [
-            "ffmpeg", "-y",
-            "-i", video_in,
-            "-i", tts_in,
-            "-i", bgm_in,
-            "-filter_complex", f"{video_filter_final};{audio_filter_final}",
-            "-map", "[v_out]",
-            "-map", "[a_out]",
-            "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
-            "-c:a", "aac",
-            video_out
-        ]
-        
-        subprocess.run(cmd_fixed, check=True)
-        console.print(f"[bold green]RENDER VIDEO THÀNH CÔNG![/bold green] -> {video_out}")
+        process = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        console.print(f"[bold green]RENDER THÀNH CÔNG![/bold green] -> {video_out}")
     except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]Lỗi Render FFmpeg:[/bold red] {e}")
+        console.print(f"[bold red]Lỗi Render:[/bold red] {e.stderr}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Module 5: Render Video Hardsub & Mix Audio (2026 Standard)")
-    parser.add_argument("--video_in", required=True, help="Video gốc")
-    parser.add_argument("--tts_in", required=True, help="Audio lồng tiếng sạch")
-    parser.add_argument("--bgm_in", required=True, help="Nhạc nền")
-    parser.add_argument("--srt_vi_in", required=True, help="Phụ đề tiếng Việt")
-    parser.add_argument("--blur_box", help="Tọa độ vùng che sub (x,y,w,h)")
-    parser.add_argument("--video_out", default="final_video.mp4", help="Video đầu ra")
-    parser.add_argument("--fps", type=int, default=30)
+    parser = argparse.ArgumentParser(description="Module 5: Render Video Hardsub & Mix Audio (2026)")
+    parser.add_argument("--video_in", required=True)
+    parser.add_argument("--tts_in", required=True)
+    parser.add_argument("--bgm_in", required=True)
+    parser.add_argument("--srt_vi_in", required=True)
+    parser.add_argument("--blur_box", help="x,y,w,h (Tọa độ từ tool_get_blur_box)")
+    parser.add_argument("--video_out", default="final_result.mp4")
     
     args = parser.parse_args()
     
-    mux_video(args.video_in, args.tts_in, args.bgm_in, args.srt_vi_in, args.blur_box, args.video_out, args.fps)
+    try:
+        mux_video(args.video_in, args.tts_in, args.bgm_in, args.srt_vi_in, args.blur_box, args.video_out)
+    except Exception as e:
+        console.print(f"[bold red]Lỗi hệ thống:[/bold red] {str(e)}")
 
 if __name__ == "__main__":
     main()

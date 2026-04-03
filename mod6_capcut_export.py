@@ -3,137 +3,188 @@ import json
 import uuid
 import argparse
 import pysrt
-from datetime import datetime
-from pydub import AudioSegment
+import shutil
 from rich.console import Console
+from datetime import datetime
 
 console = Console()
 
-def get_duration_ms(file_path):
-    """Lấy thời lượng file audio/video bằng pydub."""
+def get_capcut_draft_path():
+    """Tìm thư mục Drafts của CapCut hoặc Jianying trên Windows."""
+    local_appdata = os.getenv("LOCALAPPDATA")
+    if not local_appdata:
+        return None
+    possible_paths = [
+        os.path.join(local_appdata, "CapCut", "User Data", "Projects", "com.lveditor.draft"),
+        os.path.join(local_appdata, "CapCut", "User Data", "Projects", "com.lved.capcut.win"),
+        os.path.join(local_appdata, "JianyingPro", "User Data", "Projects", "com.lveditor.draft"),
+        os.path.join(local_appdata, "JianyingPro", "User Data", "Projects", "com.lved.jianying.win")
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+def get_duration_us(path):
+    """Lấy thời lượng file bằng ffprobe (trả về microseconds)."""
+    import subprocess
+    cmd = [
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", path
+    ]
     try:
-        audio = AudioSegment.from_file(file_path)
-        return len(audio)
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        return int(float(res.stdout.strip()) * 1000000) if res.stdout.strip() else 0
     except:
         return 0
 
-def create_capcut_json(project_name, video_path, bgm_path, tts_path, srt_path):
+def export_with_template(video_in, tts_in, bgm_in, srt_vi_in, project_dir, template_dir):
     """
-    Sinh file draft_content.json chuẩn cấu trúc CapCut PC.
-    Thời gian trong CapCut tính bằng Microseconds (1s = 1,000,000).
+    Clone MAU_CHUAN và CHỈ PATCH các trường cần thiết, giữ nguyên tất cả trường khác.
     """
-    video_dur_ms = get_duration_ms(video_path)
-    bgm_dur_ms = get_duration_ms(bgm_path)
-    tts_dur_ms = get_duration_ms(tts_path)
-    subs = pysrt.open(srt_path)
+    video_dur = get_duration_us(video_in)
+    tts_dur = get_duration_us(tts_in)
+    bgm_dur = get_duration_us(bgm_in) if os.path.exists(bgm_in) else 0
 
-    # Khởi tạo Metadata
-    video_id = str(uuid.uuid4())
-    bgm_id = str(uuid.uuid4())
-    tts_id = str(uuid.uuid4())
+    # ========== BƯỚC 1: Clone toàn bộ MAU_CHUAN ==========
+    if os.path.exists(project_dir):
+        shutil.rmtree(project_dir)
+    shutil.copytree(template_dir, project_dir)
+    console.print("[bold green]>>> Đã clone toàn bộ MAU_CHUAN.[/bold green]")
 
-    content = {
-        "canvas_config": {"height": 1080, "width": 1920},
-        "duration": video_dur_ms * 1000,
-        "tracks": [],
-        "materials": {
-            "videos": [
-                {"id": video_id, "path": os.path.abspath(video_path), "duration": video_dur_ms * 1000, "type": "video"}
-            ],
-            "audios": [
-                {"id": bgm_id, "path": os.path.abspath(bgm_path), "duration": bgm_dur_ms * 1000, "type": "audio"},
-                {"id": tts_id, "path": os.path.abspath(tts_path), "duration": tts_dur_ms * 1000, "type": "audio"}
-            ],
-            "texts": []
-        }
-    }
+    # ========== BƯỚC 2: Đọc Meta gốc (đã copy), CHỈ PATCH vài trường ==========
+    meta_path = os.path.join(project_dir, "draft_meta_info.json")
+    with open(meta_path, 'r', encoding='utf-8') as f:
+        meta = json.load(f)
 
-    # 1. Track Video
-    content["tracks"].append({
-        "id": str(uuid.uuid4()), "type": "video",
-        "segments": [{
-            "id": str(uuid.uuid4()), "material_id": video_id,
-            "target_timerange": {"duration": video_dur_ms * 1000, "start": 0},
-            "source_timerange": {"duration": video_dur_ms * 1000, "start": 0}
-        }]
-    })
+    # Chỉ thay đổi những gì CẦN thay đổi
+    new_draft_id = str(uuid.uuid4()).upper()
+    now_us = int(datetime.now().timestamp() * 1000000)
 
-    # 2. Track BGM (Volume 0.3)
-    content["tracks"].append({
-        "id": str(uuid.uuid4()), "type": "audio",
-        "segments": [{
-            "id": str(uuid.uuid4()), "material_id": bgm_id,
-            "target_timerange": {"duration": bgm_dur_ms * 1000, "start": 0},
-            "source_timerange": {"duration": bgm_dur_ms * 1000, "start": 0},
-            "common_config": {"volume": 0.3}
-        }]
-    })
+    meta["draft_id"] = new_draft_id
+    meta["draft_name"] = os.path.basename(project_dir)
+    meta["draft_fold_path"] = project_dir.replace("\\", "/")
+    meta["tm_draft_create"] = now_us
+    meta["tm_draft_modified"] = now_us
 
-    # 3. Track TTS
-    content["tracks"].append({
-        "id": str(uuid.uuid4()), "type": "audio",
-        "segments": [{
-            "id": str(uuid.uuid4()), "material_id": tts_id,
-            "target_timerange": {"duration": tts_dur_ms * 1000, "start": 0},
-            "source_timerange": {"duration": tts_dur_ms * 1000, "start": 0}
-        }]
-    })
+    with open(meta_path, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=4)
 
-    # 4. Track Subtitles (Text)
-    text_track_segments = []
+    console.print("[bold green]>>> Đã patch Meta (giữ nguyên cấu trúc gốc).[/bold green]")
+
+    # ========== BƯỚC 3: Tìm Timeline ID từ root content ==========
+    root_content_path = os.path.join(project_dir, "draft_content.json")
+    with open(root_content_path, 'r', encoding='utf-8') as f:
+        root_data = json.load(f)
+    timeline_id = root_data.get("id")
+
+    # ========== BƯỚC 4: Patch inner Timeline content ==========
+    inner_path = os.path.join(project_dir, "Timelines", timeline_id, "draft_content.json")
+    if not os.path.exists(inner_path):
+        console.print(f"[bold red]Không tìm thấy Timeline: {inner_path}[/bold red]")
+        return
+
+    with open(inner_path, 'r', encoding='utf-8') as f:
+        inner_data = json.load(f)
+
+    # Tạo material IDs
+    v_mat_id = str(uuid.uuid4()).lower()
+    t_mat_id = str(uuid.uuid4()).lower()
+    b_mat_id = str(uuid.uuid4()).lower()
+
+    # Cập nhật duration
+    inner_data["duration"] = video_dur
+
+    # Thay thế materials
+    inner_data["materials"]["videos"] = [
+        {"id": v_mat_id, "path": video_in.replace("\\", "/"), "duration": video_dur, "type": "video"}
+    ]
+    inner_data["materials"]["audios"] = [
+        {"id": t_mat_id, "path": tts_in.replace("\\", "/"), "duration": tts_dur, "type": "audio"}
+    ]
+    if bgm_dur > 0:
+        inner_data["materials"]["audios"].append(
+            {"id": b_mat_id, "path": bgm_in.replace("\\", "/"), "duration": bgm_dur, "type": "audio"}
+        )
+    inner_data["materials"]["texts"] = []
+
+    # Thay thế tracks
+    inner_data["tracks"] = [
+        {"id": str(uuid.uuid4()).upper(), "type": "audio", "segments": [
+            {"id": str(uuid.uuid4()).upper(), "material_id": t_mat_id,
+             "target_timerange": {"duration": tts_dur, "start": 0},
+             "source_timerange": {"duration": tts_dur, "start": 0}, "volume": 2.0}
+        ]},
+        {"id": str(uuid.uuid4()).upper(), "type": "video", "segments": [
+            {"id": str(uuid.uuid4()).upper(), "material_id": v_mat_id,
+             "target_timerange": {"duration": video_dur, "start": 0},
+             "source_timerange": {"duration": video_dur, "start": 0}}
+        ]},
+        {"id": str(uuid.uuid4()).upper(), "type": "audio", "segments": []},
+        {"id": str(uuid.uuid4()).upper(), "type": "text", "segments": []}
+    ]
+
+    # BGM track
+    if bgm_dur > 0:
+        inner_data["tracks"][2]["segments"].append({
+            "id": str(uuid.uuid4()).upper(), "material_id": b_mat_id,
+            "target_timerange": {"duration": video_dur, "start": 0},
+            "source_timerange": {"duration": video_dur, "start": 0}, "volume": 0.2
+        })
+
+    # Subtitles track
+    subs = pysrt.open(srt_vi_in, encoding='utf-8')
     for sub in subs:
-        text_id = str(uuid.uuid4())
-        start_us = sub.start.ordinal * 1000
-        end_us = sub.end.ordinal * 1000
-        dur_us = end_us - start_us
-        
-        content["materials"]["texts"].append({
-            "id": text_id,
-            "content": json.dumps({
-                "text": sub.text,
-                "styles": [{"font_size": 20, "color": "#FFFFFF"}]
-            })
+        txt_id = str(uuid.uuid4()).lower()
+        start = sub.start.ordinal * 1000
+        dur = (sub.end.ordinal - sub.start.ordinal) * 1000
+        inner_data["materials"]["texts"].append({"id": txt_id, "content": sub.text, "type": "text"})
+        inner_data["tracks"][3]["segments"].append({
+            "id": str(uuid.uuid4()).upper(), "material_id": txt_id,
+            "target_timerange": {"duration": dur, "start": start},
+            "source_timerange": {"duration": dur, "start": 0}
         })
-        
-        text_track_segments.append({
-            "id": str(uuid.uuid4()), "material_id": text_id,
-            "target_timerange": {"duration": dur_us, "start": start_us}
-        })
-        
-    content["tracks"].append({"id": str(uuid.uuid4()), "type": "text", "segments": text_track_segments})
 
-    return content
+    with open(inner_path, 'w', encoding='utf-8') as f:
+        json.dump(inner_data, f, ensure_ascii=False, indent=4)
+
+    console.print("[bold green]>>> Đã patch Timeline content.[/bold green]")
+
+    # ========== BƯỚC 5: Cập nhật root duration ==========
+    root_data["duration"] = video_dur
+    with open(root_content_path, 'w', encoding='utf-8') as f:
+        json.dump(root_data, f, ensure_ascii=False, indent=4)
+
+    console.print(f"[bold green]XUẤT DỰ ÁN CAPCUT THÀNH CÔNG: {os.path.basename(project_dir)}[/bold green]")
 
 def main():
-    parser = argparse.ArgumentParser(description="Module 6: Xuất Project CapCut PC (LongTieng 2026 Edition)")
+    parser = argparse.ArgumentParser(description="Module 6: Xuất project CapCut v8.x (Patch-Only Clone)")
     parser.add_argument("--video_in", required=True)
-    parser.add_argument("--bgm_in", required=True)
     parser.add_argument("--tts_in", required=True)
+    parser.add_argument("--bgm_in", required=True)
     parser.add_argument("--srt_vi_in", required=True)
-    parser.add_argument("--project_name", default="Reup_Video_Dubbing")
-    
+    parser.add_argument("--project_name", default="")
+
     args = parser.parse_args()
-    
-    output_dir = os.path.join(os.getcwd(), f"CapCut_Draft_{args.project_name}")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 1. Gen Draft Content
-    draft_content = create_capcut_json(args.project_name, args.video_in, args.bgm_in, args.tts_in, args.srt_vi_in)
-    with open(os.path.join(output_dir, "draft_content.json"), "w", encoding="utf-8") as f:
-        json.dump(draft_content, f, indent=4, ensure_ascii=False)
-        
-    # 2. Gen Meta Info
-    meta_info = {
-        "draft_id": str(uuid.uuid4()),
-        "draft_name": args.project_name,
-        "draft_updated_time": int(datetime.now().timestamp() * 1000)
-    }
-    with open(os.path.join(output_dir, "draft_meta_info.json"), "w", encoding="utf-8") as f:
-        json.dump(meta_info, f, indent=4, ensure_ascii=False)
-        
-    console.print(f"[bold green]XUẤT DỰ ÁN CAPCUT THÀNH CÔNG![/bold green]")
-    console.print(f"Thư mục Draft: [bold magenta]{output_dir}[/bold magenta]")
-    console.print("Gợi ý: Copy toàn bộ thư mục này vào folder Drafts của CapCut Desktop để mở.")
+    p_name = args.project_name if args.project_name else datetime.now().strftime("%m%d_%H%M%S")
+
+    capcut_base = get_capcut_draft_path()
+    if not capcut_base:
+        console.print("[bold red]LỖI: Không tìm thấy thư mục CapCut![/bold red]")
+        return
+
+    project_dir = os.path.join(capcut_base, p_name)
+    template_dir = os.path.join(capcut_base, "MAU_CHUAN")
+
+    if not os.path.exists(template_dir):
+        console.print("[bold red]LỖI: Không tìm thấy dự án MAU_CHUAN![/bold red]")
+        return
+
+    console.print(f"[bold cyan]>>> Clone + Patch: {p_name}...[/bold cyan]")
+    try:
+        export_with_template(args.video_in, args.tts_in, args.bgm_in, args.srt_vi_in, project_dir, template_dir)
+    except Exception as e:
+        console.print(f"[bold red]Lỗi: {str(e)}[/bold red]")
 
 if __name__ == "__main__":
     main()
