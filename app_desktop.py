@@ -367,6 +367,9 @@ class BumYTCloneExactApp(ctk.CTk):
         self.roi_slider.set(0)
         self.roi_slider.pack(fill="x", padx=40, pady=10)
         
+        # Thêm nút Xóa vùng chọn
+        ctk.CTkButton(self.roi_win, text="XÓA VÙNG CHỌN", width=150, fg_color=B_DANGER, command=self._clear_roi).pack(pady=10)
+        
         self.roi_canvas.bind("<ButtonPress-1>", self._on_roi_press)
         self.roi_canvas.bind("<B1-Motion>", self._on_roi_drag)
         self.roi_canvas.bind("<ButtonRelease-1>", self._on_roi_release)
@@ -387,7 +390,7 @@ class BumYTCloneExactApp(ctk.CTk):
         # Resize to fit canvas
         cw = self.roi_canvas.winfo_width()
         ch = self.roi_canvas.winfo_height()
-        if cw < 100: cw = 900 # Default if winfo not ready
+        if cw < 100: cw = 900 # Default
         if ch < 100: ch = 600
 
         self.scale_f = min(cw/self.video_w, ch/self.video_h)
@@ -399,23 +402,40 @@ class BumYTCloneExactApp(ctk.CTk):
         img_resized = img.resize((nw, nh), Image.Resampling.LANCZOS)
         
         self.tk_image = ImageTk.PhotoImage(img_resized)
-        self.roi_canvas.delete("all")
+        self.roi_canvas.delete("all") # Xóa hết cả ảnh cũ và hình cũ
         self.roi_canvas.create_image(cw//2, ch//2, image=self.tk_image, anchor="center")
         
-        # Redraw existing ROI if any
+        # Vẽ lại ROI duy nhất nếu có
         if self.roi_coords:
-            x, y, w, h = self.roi_coords
-            x1 = (x * self.scale_f) + (cw - nw) // 2
-            y1 = (y * self.scale_f) + (ch - nh) // 2
-            x2 = x1 + (w * self.scale_f)
-            y2 = y1 + (h * self.scale_f)
-            self.roi_canvas.create_rectangle(x1, y1, x2, y2, outline="red", width=3)
+            self._draw_roi_rect()
+
+    def _draw_roi_rect(self):
+        if not self.roi_coords: return
+        cw = self.roi_canvas.winfo_width()
+        ch = self.roi_canvas.winfo_height()
+        nw = int(self.video_w * self.scale_f)
+        nh = int(self.video_h * self.scale_f)
+        
+        x, y, w, h = self.roi_coords
+        off_x = (cw - nw) // 2
+        off_y = (ch - nh) // 2
+        
+        x1 = (x * self.scale_f) + off_x
+        y1 = (y * self.scale_f) + off_y
+        x2 = x1 + (w * self.scale_f)
+        y2 = y1 + (h * self.scale_f)
+        self.roi_canvas.create_rectangle(x1, y1, x2, y2, outline="red", width=3, tags="roi_rect")
+
+    def _clear_roi(self):
+        self.roi_coords = None
+        self.roi_canvas.delete("roi_rect")
+        self.log("🗑️ Đã xóa vùng chọn Blur.")
 
     def _on_roi_press(self, event):
         self.start_x = event.x
         self.start_y = event.y
-        if self.roi_rect_id: self.roi_canvas.delete(self.roi_rect_id)
-        self.roi_rect_id = self.roi_canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=3)
+        self.roi_canvas.delete("roi_rect") # Xóa mọi hình chữ nhật cũ trước khi vẽ cái mới
+        self.roi_rect_id = self.roi_canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=3, tags="roi_rect")
 
     def _on_roi_drag(self, event):
         self.roi_canvas.coords(self.roi_rect_id, self.start_x, self.start_y, event.x, event.y)
