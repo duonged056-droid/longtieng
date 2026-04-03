@@ -46,24 +46,23 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        hw_accel = []
+        # FFmpeg boxblur có giới hạn: bán kính (radius) phải nhỏ hơn một nửa chiều rộng/cao của vùng crop.
+    # Thông thường giới hạn tuyệt đối là 40, nhưng tùy kích thước vùng mà nó có thể thấp hơn (ví dụ h=76 thì radius < 38).
+    max_allowed = min((args.w // 2) - 2, (args.h // 2) - 2, 35)
+    safe_blur = max(1, min(args.blur, max_allowed))
 
-    # FFmpeg boxblur radius giới hạn tối đa là 40. Ta cap lại để tránh lỗi.
-    safe_blur = min(args.blur, 40)
-
-    # Filter phức hợp: cắt vùng -> làm mờ -> đè lên gốc
-    # Đảm bảo chuỗi filter là duy nhất và không bị ngắt quãng.
-    f_crop = f"crop={args.w}:{args.h}:{args.x}:{args.y}"
-    f_blur = f"boxblur={safe_blur}:{safe_blur}"
-    filter_chain = f"[0:v]{f_crop},{f_blur}[bg];[0:v][bg]overlay={args.x}:{args.y}[outv]"
+    # Filter phức hợp:
+    # 1. Trích xuất vùng (crop) -> Làm mờ (boxblur) -> gán nhãn [b]
+    # 2. Lấy video gốc [0:v] đè nhãn [b] lên tại tọa độ x,y -> gán nhãn [vout]
+    filter_chain = f"[0:v]crop={args.w}:{args.h}:{args.x}:{args.y},boxblur={safe_blur}:1[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
 
     cmd = [
         ffmpeg_cmd, "-y",
     ] + hw_accel + [
         "-i", args.video_in,
         "-filter_complex", filter_chain,
-        "-map", "[outv]",
-        "-map", "0:a?",    # Giữ âm thanh nếu có
+        "-map", "[vout]",
+        "-map", "0:a?",
         "-c:v", encoder,
         "-preset", preset,
         "-c:a", "copy",
