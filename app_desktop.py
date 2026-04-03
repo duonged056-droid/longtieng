@@ -286,6 +286,17 @@ class BumYTCloneExactApp(ctk.CTk):
         self.chk_capcut.pack(anchor="w", pady=2)
         self.chk_capcut.select()  # Mặc định bật
 
+        # --- AUTO-SEPARATION AND AUDIO EXPORT OPTIONS ---
+        auto_opt_frame = ctk.CTkFrame(opt_frame, fg_color="transparent")
+        auto_opt_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.chk_auto_sep = ctk.CTkCheckBox(auto_opt_frame, text="🔊 Tự động tách nhạc nền (AI - Demucs)", text_color=B_ACCENT)
+        self.chk_auto_sep.pack(anchor="w", pady=2)
+        
+        self.chk_separate_audio = ctk.CTkCheckBox(auto_opt_frame, text="🎚️ Xuất nhạc & lời riêng biệt (để chỉnh volume trong CapCut)")
+        self.chk_separate_audio.select()
+        self.chk_separate_audio.pack(anchor="w", pady=2)
+
         # --- NEW SECTION: 5. LÀM MỜ SUB CŨ (FIXED BLUR) ---
         blur_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
         blur_frame.pack(fill="x", padx=10, pady=10)
@@ -516,7 +527,6 @@ class BumYTCloneExactApp(ctk.CTk):
             self.opt_voice_id.set("Google Nữ")
 
     def run_tab3(self):
-        
         custom_srt = self.entry_srt_in.get().strip()
         custom_video = self.entry_video_t3.get().strip()
 
@@ -530,7 +540,7 @@ class BumYTCloneExactApp(ctk.CTk):
         # Hardcode box vì đã bỏ Tab 1 chọn ROI
         blur_box = "none"
 
-        self.log("\n>>> BẮT ĐẦU CHUYỂN ĐỔI (DUBBING & RENDER)...")
+        self.log("\n>>> BẮT ĐẦU QUY TRÌNH TỰ ĐỘNG (FULL PIPELINE)...")
         
         # Mapping voice config
         tts_prov = self.opt_tts_prov.get()
@@ -543,13 +553,12 @@ class BumYTCloneExactApp(ctk.CTk):
         if engine == "tiktok":
             if "Nam" in voice_label: voice_id = "vi_vn_001"
             elif "trầm" in voice_label: voice_id = "vi_vn_003"
-            else: voice_id = "vi_vn_002" # Hà Nhân
+            else: voice_id = "vi_vn_002"
         else:
             if "Nam" in voice_label: voice_id = "vi-VN-NamMinhNeural"
             else: voice_id = "vi-VN-HoaiMyNeural"
             
         if self.chk_multi_voice.get():
-            # Tự động thay đổi giọng cho các nhân vật khác nhau để "tách kỹ ra"
             if engine == "tiktok":
                 v00 = voice_id
                 v01 = "vi_vn_001" if v00 in ["vi_vn_002", "vi_vn_003"] else "vi_vn_002"
@@ -579,13 +588,25 @@ class BumYTCloneExactApp(ctk.CTk):
         # Video sync outputs
         video_synced = os.path.join(self.out_dir, "video_synced.mp4")
         audio_synced = os.path.join(self.out_dir, "voices_synced.wav")
+        bgm_synced = os.path.join(self.out_dir, "bgm_synced.wav")
         srt_synced = os.path.join(self.out_dir, "vi_synced.srt")
         
         speed_val = self.spd_slider.get()
         ffmpeg_bin = self.ffmpeg_path.get().strip()
 
         tasks = []
-        # 1. TTS Dubbing (giữ segments cho video sync)
+        
+        # 0. Tự động tách BGM (Demucs AI)
+        bgm_clean = os.path.join(self.out_dir, "bgm_clean.wav")
+        if self.chk_auto_sep.get() and custom_video:
+            cmd_m1 = [
+                get_python(), "mod1_demucs.py",
+                "--video_in", custom_video,
+                "--output_dir", self.out_dir
+            ]
+            tasks.append(cmd_m1)
+
+        # 1. TTS Dubbing
         cmd_m4 = [
             get_python(), "mod4_tts_dubbing.py", 
             "--srt_vi_in", custom_srt, 
@@ -599,7 +620,7 @@ class BumYTCloneExactApp(ctk.CTk):
         tasks.append(cmd_m4)
 
         if custom_video:
-            # 2. Video Sync (slow down video để khớp audio)
+            # 2. Video Sync & BGM Stretch
             cmd_m7 = [
                 get_python(), "mod7_video_sync.py",
                 "--video_in", custom_video,
@@ -612,23 +633,26 @@ class BumYTCloneExactApp(ctk.CTk):
                 "--ffmpeg_path", ffmpeg_bin
             ]
             
-            # Tự động phát hiện nếu đã tách BGM bằng Section 6
-            bgm_clean = os.path.join(self.out_dir, "bgm_clean.wav")
-            if os.path.exists(bgm_clean):
+            # Kiểm tra BGM khả dụng
+            can_use_bgm = self.chk_auto_sep.get() or os.path.exists(bgm_clean)
+            if can_use_bgm:
                 cmd_m7 += ["--bgm_in", bgm_clean]
-                # Cập nhật bgm_wav cho các bước sau
-                bgm_wav = bgm_clean
-                
+                if self.chk_separate_audio.get():
+                    cmd_m7 += ["--bgm_out", bgm_synced]
+                    # Tiếp theo dùng bản synced tách rời
+                    bgm_wav = bgm_synced
+                else:
+                    bgm_wav = bgm_clean
+
             tasks.append(cmd_m7)
             
-            # 3. Muxing — tự chọn file sync hoặc gốc
-            # (mod7 có thể lỗi → fallback dùng file gốc)
+            # 3. Check & Muxing
             tasks.append(("__check_sync__", custom_video, video_synced, 
                           output_mp3, audio_synced, custom_srt, srt_synced))
             
             cmd_m5 = [
                 get_python(), "mod5_mux_video.py", 
-                "--video_in", "__VIDEO__",  # placeholder, sẽ được thay
+                "--video_in", "__VIDEO__", 
                 "--tts_in", "__AUDIO__", 
                 "--bgm_in", bgm_wav, 
                 "--srt_vi_in", "__SRT__", 
@@ -637,7 +661,7 @@ class BumYTCloneExactApp(ctk.CTk):
             ]
             tasks.append(cmd_m5)
             
-            # 4. CapCut Export
+            # 4. CapCut Export (Track nhạc và lời riêng biệt)
             if self.chk_capcut.get():
                 cmd_m6 = [
                     get_python(), "mod6_capcut_export.py",
@@ -648,9 +672,9 @@ class BumYTCloneExactApp(ctk.CTk):
                 ]
                 tasks.append(cmd_m6)
         else:
-            self.log("Bỏ qua muxing video và tạo CapCut vì không có file video đầu vào.", level="warning")
+            self.log("Bỏ qua muxing video và tạo CapCut vì không có video.", level="warning")
         
-        threading.Thread(target=self._run_cmds, args=(tasks, "QUY TRÌNH HOÀN TẤT! Video/Audio đã được tạo.")).start()
+        threading.Thread(target=self._run_cmds, args=(tasks, "QUY TRÌNH HOÀN TẤT!")).start()
 
     def test_voice(self):
         text = self.test_text.get()

@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--timing_json", required=True)
     parser.add_argument("--srt_vi_in", required=True)
     parser.add_argument("--bgm_in", help="File nhạc nền (không lời) để đồng bộ")
+    parser.add_argument("--bgm_out", help="Đường dẫn lưu file nhạc nền đã đồng bộ")
     parser.add_argument("--aligned_dir", default="temp", help="Thư mục chứa aligned_*.wav")
     parser.add_argument("--video_out", required=True)
     parser.add_argument("--audio_out", required=True)
@@ -197,19 +198,26 @@ def main():
     # 6. Rebuild Audio: Đây là chìa khóa để khớp tiếng
     console.print("[cyan]🎵 Đang hòa trộn Lồng tiếng & Nhạc nền...[/cyan]")
     if has_bgm and os.path.exists(temp_bgm_wav):
-        full_audio = AudioSegment.from_file(temp_bgm_wav)
+        bgm_final_audio = AudioSegment.from_file(temp_bgm_wav)
+        # Nếu yêu cầu xuất bgm_out riêng biệt
+        if args.bgm_out:
+            bgm_final_audio[:current_new_time_ms].export(args.bgm_out, format="wav")
+            console.print(f"[green]✅ Đã xuất riêng Nhạc nền đồng bộ: {args.bgm_out}[/green]")
     else:
-        full_audio = AudioSegment.silent(duration=current_new_time_ms + 1000)
-        
+        bgm_final_audio = AudioSegment.silent(duration=current_new_time_ms + 1000)
+    
+    # Tạo track lồng tiếng riêng
+    vocal_final_audio = AudioSegment.silent(duration=current_new_time_ms + 1000)
     for seg in new_segments:
         if seg["type"] == "sub":
             wav_p = os.path.join(args.aligned_dir, f"aligned_{seg['index']}.wav")
             if os.path.exists(wav_p):
-                full_audio = full_audio.overlay(AudioSegment.from_file(wav_p), position=seg["new_start"])
+                vocal_final_audio = vocal_final_audio.overlay(AudioSegment.from_file(wav_p), position=seg["new_start"])
     
     # Cắt chính xác theo thời gian mới
-    final_audio = full_audio[:current_new_time_ms]
-    final_audio.export(args.audio_out, format="wav")
+    vocal_out_audio = vocal_final_audio[:current_new_time_ms]
+    vocal_out_audio.export(args.audio_out, format="wav")
+    console.print(f"[green]✅ Đã xuất riêng Lồng tiếng đồng bộ: {args.audio_out}[/green]")
 
     # 7. Xuất SRT đồng bộ
     console.print("[cyan]📝 Đang xuất SRT đồng bộ...[/cyan]")
