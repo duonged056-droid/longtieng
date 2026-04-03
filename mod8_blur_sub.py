@@ -46,16 +46,18 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        # gblur (Gaussian Blur) cho chất lượng mờ đẹp ("mờ trong") và ổn định hơn boxblur.
-    # Sigma tầm 10-20 là rất mạnh rồi. Ta không bị giới hạn kén chọn như boxblur.
-    safe_sigma = max(1.0, min(args.blur / 3.0, 20.0))
-
-    # Filter phức hợp: 
-    # [0:v] video gốc -> crop -> làm mờ Gaussian (gblur) -> gán nhãn [b]
-    # Sau đó đè [b] lên [0:v] -> gán nhãn [vout]
+        # Sử dụng bộ lọc "delogo" để đạt yêu cầu "cùng màu với nền video đằng sau".
+    # delogo nội suy từ các pixel xung quanh vùng chọn để lấp đầy, giúp xóa vết chữ cực kỳ tự nhiên.
+    # Ta kết hợp delogo + một chút gblur nhẹ để làm mịn vùng nội suy.
+    
+    # 1. Trích xuất vùng (crop)
+    # 2. Xóa bằng delogo (nội suy màu từ môi trường)
+    # 3. Làm mịn bằng gblur (sigma thấp để không bị loang màu)
     f_crop = f"crop={args.w}:{args.h}:{args.x}:{args.y}"
-    f_blur = f"gblur=sigma={safe_sigma}:steps=3"
-    filter_chain = f"[0:v]{f_crop},{f_blur}[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
+    f_delogo = f"delogo=x=0:y=0:w={args.w}:h={args.h}:band=1" 
+    f_blur = f"gblur=sigma=10:steps=1"
+    
+    filter_chain = f"[0:v]{f_crop},{f_delogo},{f_blur}[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
 
     cmd = [
         ffmpeg_cmd, "-y",
