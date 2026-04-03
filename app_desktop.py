@@ -179,173 +179,125 @@ class BumYTCloneExactApp(ctk.CTk):
 
     # ==========================================================
     # CHUYỂN ĐỔI (TTS & RENDER CAPCUT)
-    # ==========================================================
-
-
     def _build_tab3_convert(self):
-
         frame = ctk.CTkFrame(self.main_content, fg_color="transparent")
         frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(0, weight=1)  # Top part expands
-        frame.grid_rowconfigure(1, weight=0)  # Bottom part fixed/min height
+        frame.grid_rowconfigure(0, weight=1)  
+        frame.grid_rowconfigure(1, weight=0)  
         
-        # TRÊN: Khu vực thao tác (Scrollable)
+        # --- TOP AREA (SCROLLABLE DASHBOARD) ---
         top_frame = ctk.CTkScrollableFrame(frame, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         
-        # 1. TTS Provider Config
-        tts_frame = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR)
-        tts_frame.pack(fill="x", padx=10, pady=5)
+        # --- TITLE HEADER ---
+        header_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=(10, 20))
+        ctk.CTkLabel(header_frame, text="⚡ LONG-TIENG AI PRO v2026", font=ctk.CTkFont(size=24, weight="bold"), text_color=B_ACCENT).pack(side="left", padx=5)
         
-        ctk.CTkLabel(tts_frame, text="Nhà cung cấp TTS:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.opt_tts_prov = ctk.CTkOptionMenu(tts_frame, values=["Edge TTS", "TikTok TTS", "Google TTS"], width=200, fg_color=B_FRAME, command=self.update_voice_options)
+        # --- CARD 1: 🎙️ GIỌNG ĐỌC & TTS ---
+        card_voice = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR, corner_radius=15, border_width=1, border_color="#2b2b2b")
+        card_voice.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(card_voice, text="🎙️ 1. Cấu hình Giọng Đọc & TTS", font=ctk.CTkFont(size=15, weight="bold"), text_color=B_SUCCESS).pack(anchor="w", padx=15, pady=(10, 5))
+        
+        v_grid = ctk.CTkFrame(card_voice, fg_color="transparent")
+        v_grid.pack(fill="x", padx=15, pady=10)
+        
+        ctk.CTkLabel(v_grid, text="Provider:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.opt_tts_prov = ctk.CTkOptionMenu(v_grid, values=["Edge TTS", "TikTok TTS", "Google TTS"], width=180, fg_color=B_FRAME, command=self.update_voice_options)
         self.opt_tts_prov.set("Edge TTS")
-        self.opt_tts_prov.grid(row=0, column=1, padx=10, pady=10, sticky="w")
+        self.opt_tts_prov.grid(row=0, column=1, padx=5, pady=5)
         
-        ctk.CTkLabel(tts_frame, text="Giọng đọc:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        self.opt_voice_id = ctk.CTkOptionMenu(tts_frame, values=["Edge Hoài My (Nữ YouTube)", "Edge Nam Minh (Nam YouTube)"], width=200, fg_color=B_FRAME)
+        ctk.CTkLabel(v_grid, text="Giọng đọc:").grid(row=0, column=2, padx=(20, 5), pady=5, sticky="w")
+        self.opt_voice_id = ctk.CTkOptionMenu(v_grid, values=["Edge Hoài My (Nữ YouTube)", "Edge Nam Minh (Nam YouTube)"], width=220, fg_color=B_FRAME)
         self.opt_voice_id.set("Edge Hoài My (Nữ YouTube)")
-        self.opt_voice_id.grid(row=1, column=1, padx=10, pady=10, sticky="w")
-
-        # 2. Test Voice Section
-        test_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
-        test_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(test_frame, text="📣 Test Giọng Đọc", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        self.opt_voice_id.grid(row=0, column=3, padx=5, pady=5)
         
-        test_input_frame = ctk.CTkFrame(test_frame, fg_color="transparent")
-        test_input_frame.pack(fill="x", padx=10, pady=5)
-        self.test_text = ctk.CTkEntry(test_input_frame, placeholder_text="Nhập nội dung test thử ở đây...")
-        self.test_text.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ctk.CTkButton(test_input_frame, text="Test", width=80, fg_color=B_ACCENT, command=self.test_voice).pack(side="right")
+        ctk.CTkLabel(v_grid, text="Test giọng:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.test_text = ctk.CTkEntry(v_grid, placeholder_text="Nhập chữ test...", width=300)
+        self.test_text.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(v_grid, text="🔊 Chạy Thử", width=100, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.test_voice).grid(row=1, column=3, padx=5, pady=5)
 
-        # 3. Path & Config
-        cfg_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
-        cfg_frame.pack(fill="x", padx=10, pady=5)
+        # --- CARD 2: 📂 DỰ ÁN & FILE NGUỒN ---
+        card_proj = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR, corner_radius=15, border_width=1, border_color="#2b2b2b")
+        card_proj.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(card_proj, text="📂 2. Dự Án & File Nguồn", font=ctk.CTkFont(size=15, weight="bold"), text_color=B_SUCCESS).pack(anchor="w", padx=15, pady=(10, 5))
         
-        ctk.CTkLabel(cfg_frame, text="Đường dẫn FFmpeg:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.ffmpeg_path = ctk.CTkEntry(cfg_frame, width=500)
+        p_grid = ctk.CTkFrame(card_proj, fg_color="transparent")
+        p_grid.pack(fill="x", padx=15, pady=10)
+        p_grid.columnconfigure(1, weight=1)
+        
+        # SRT
+        ctk.CTkLabel(p_grid, text="File SRT nguồn:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.entry_srt_in = ctk.CTkEntry(p_grid)
+        self.entry_srt_in.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(p_grid, text="Mở File...", width=100, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_srt_in, [("SRT", "*.srt")])).grid(row=0, column=2, padx=5)
+        
+        # Video
+        ctk.CTkLabel(p_grid, text="Video lồng tiếng:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.entry_video_t3 = ctk.CTkEntry(p_grid)
+        self.entry_video_t3.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(p_grid, text="Mở File...", width=100, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_video_t3, [("Video", "*.mp4 *.avi *.mkv")])).grid(row=1, column=2, padx=5)
+        
+        # Output Path (Hồ sơ)
+        ctk.CTkLabel(p_grid, text="FFmpeg Path:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.ffmpeg_path = ctk.CTkEntry(p_grid)
         default_ffmpeg = os.path.abspath(os.path.join(os.path.dirname(__file__), "ffmpeg-2026-03-30-git-e54e117998-full_build", "bin", "ffmpeg.exe"))
         self.ffmpeg_path.insert(0, default_ffmpeg.replace("\\", "/"))
-        self.ffmpeg_path.grid(row=0, column=1, padx=10, pady=5)
-        ctk.CTkButton(cfg_frame, text="Chọn...", width=80, fg_color=B_FRAME, command=lambda: self.pick_file(self.ffmpeg_path, [("Executable", "*.exe")])).grid(row=0, column=2, padx=5, pady=5)
+        self.ffmpeg_path.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkButton(p_grid, text="Cấu hình...", width=100, fg_color=B_FRAME, command=lambda: self.pick_file(self.ffmpeg_path, [("Exe", "*.exe")])).grid(row=2, column=2, padx=5)
 
-        # 4. Conversion Options
-        opt_frame = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR)
-        opt_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(opt_frame, text="🛠️ Chuyển đổi - Tùy chọn", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        # --- CARD 3: ⚙️ CHẾ ĐỘ XỬ LÝ (Processing Modes) ---
+        card_mode = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR, corner_radius=15, border_width=1, border_color="#2b2b2b")
+        card_mode.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(card_mode, text="⚙️ 3. Chế độ Xử lý & Tùy chọn", font=ctk.CTkFont(size=15, weight="bold"), text_color=B_SUCCESS).pack(anchor="w", padx=15, pady=(10, 5))
         
-        grid_opts = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        grid_opts.pack(fill="x", padx=10, pady=5)
+        m_grid = ctk.CTkFrame(card_mode, fg_color="transparent")
+        m_grid.pack(fill="x", padx=15, pady=10)
         
-        # SRT Nguồn
-        ctk.CTkLabel(grid_opts, text="File SRT nguồn:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.entry_srt_in = ctk.CTkEntry(grid_opts, width=500)
-        self.entry_srt_in.grid(row=0, column=1, padx=10, pady=5)
-        ctk.CTkButton(grid_opts, text="Chọn File SRT...", width=120, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_srt_in, [("SRT", "*.srt")])).grid(row=0, column=2, padx=5)
-
-        # Tên MP3 ra
-        ctk.CTkLabel(grid_opts, text="Tên file MP3 đầu ra:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.entry_mp3_out = ctk.CTkEntry(grid_opts, width=500)
-        self.entry_mp3_out.insert(0, "capcut/translated_audio.mp3")
-        self.entry_mp3_out.grid(row=1, column=1, padx=10, pady=5)
-        
-        # Tốc độ đọc
-        ctk.CTkLabel(grid_opts, text="Tốc độ đọc:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.lbl_spd_val = ctk.CTkLabel(grid_opts, text="1.0x")
-        self.spd_slider = ctk.CTkSlider(grid_opts, from_=0.5, to=2.0, button_color=B_ACCENT, progress_color=B_ACCENT, command=lambda v: self.lbl_spd_val.configure(text=f"{v:.1f}x"))
-        self.spd_slider.set(1.0)
-        self.spd_slider.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-        self.lbl_spd_val.grid(row=2, column=2, padx=5)
-
-        # Cỡ phụ đề
-        ctk.CTkLabel(grid_opts, text="Cỡ phụ đề:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.font_size_slider = ctk.CTkSlider(grid_opts, from_=10, to=100, button_color=B_ACCENT, progress_color=B_ACCENT)
-        self.font_size_slider.set(18)
-        self.font_size_slider.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
-        ctk.CTkLabel(grid_opts, text="18").grid(row=3, column=2, padx=5)
-
-        # File Video
-        ctk.CTkLabel(grid_opts, text="File Video (Muxing/CapCut):").grid(row=4, column=0, padx=10, pady=5, sticky="w")
-        self.entry_video_t3 = ctk.CTkEntry(grid_opts, width=500)
-        self.entry_video_t3.grid(row=4, column=1, padx=10, pady=5)
-        ctk.CTkButton(grid_opts, text="Chọn Video...", width=120, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_video_t3, [("Video", "*.mp4 *.avi *.mkv")])).grid(row=4, column=2, padx=5)
-
-        # Checkboxes Group
-        chk_frame = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        chk_frame.pack(fill="x", padx=10, pady=10)
-        
-        self.chk_temp_sort = ctk.CTkCheckBox(chk_frame, text="Sắp xếp file trong thư mục temp để dễ dàng chỉnh sửa")
-        self.chk_temp_sort.pack(anchor="w", pady=2)
-        self.chk_temp_del = ctk.CTkCheckBox(chk_frame, text="Tự động xóa thư mục temp sau khi hoàn thành")
-        self.chk_temp_del.pack(anchor="w", pady=2)
-        self.chk_audio_edit = ctk.CTkCheckBox(chk_frame, text="🔊 Audio Edit (xuất từng segment riêng, không ghép)")
-        self.chk_audio_edit.pack(anchor="w", pady=2)
-        self.chk_multi_voice = ctk.CTkCheckBox(chk_frame, text="🎭 Lồng tiếng đa giọng (mỗi nhân vật 1 giọng riêng)")
-        self.chk_multi_voice.pack(anchor="w", pady=2)
-        self.chk_capcut = ctk.CTkCheckBox(chk_frame, text="🎬 Tạo dự án CapCut (cần chọn file video)", text_color=B_ACCENT)
-        self.chk_capcut.pack(anchor="w", pady=2)
-        self.chk_capcut.select()  # Mặc định bật
-
-        # --- AUTO-SEPARATION AND AUDIO EXPORT OPTIONS ---
-        auto_opt_frame = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        auto_opt_frame.pack(fill="x", padx=10, pady=5)
-        
-        self.chk_auto_sep = ctk.CTkCheckBox(auto_opt_frame, text="🔊 Tự động tách nhạc nền (AI - Demucs)", text_color=B_ACCENT)
-        self.chk_auto_sep.pack(anchor="w", pady=2)
-        
-        self.chk_separate_audio = ctk.CTkCheckBox(auto_opt_frame, text="🎚️ Xuất nhạc & lời riêng biệt (để chỉnh volume trong CapCut)")
+        self.chk_auto_sep = ctk.CTkCheckBox(m_grid, text="🔊 Tách nhạc nền (AI Demucs)", text_color=B_ACCENT)
+        self.chk_auto_sep.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.chk_separate_audio = ctk.CTkCheckBox(m_grid, text="🎚️ Xuất nhạc & lời riêng (CapCut)")
         self.chk_separate_audio.select()
-        self.chk_separate_audio.pack(anchor="w", pady=2)
+        self.chk_separate_audio.grid(row=0, column=1, padx=10, pady=5, sticky="w")
         
-        self.chk_all_clean = ctk.CTkCheckBox(auto_opt_frame, text="🗑️ Chế độ dọn dẹp (Xóa file nguồn/file tạm khi THÀNH CÔNG)", text_color=B_DANGER)
-        self.chk_all_clean.pack(anchor="w", pady=2)
+        self.chk_all_clean = ctk.CTkCheckBox(m_grid, text="🗑️ Chế độ dọn dẹp (Xóa file rác)", text_color=B_DANGER)
+        self.chk_all_clean.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.chk_capcut = ctk.CTkCheckBox(m_grid, text="🎬 Tạo dự án CapCut", text_color=B_ACCENT)
+        self.chk_capcut.select()
+        self.chk_capcut.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        
+        self.chk_multi_voice = ctk.CTkCheckBox(m_grid, text="🎭 Đa giọng đọc (Characters)")
+        self.chk_multi_voice.grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.chk_audio_edit = ctk.CTkCheckBox(m_grid, text="🎧 Audio Edit Mode (Tách segment)")
+        self.chk_audio_edit.grid(row=2, column=1, padx=10, pady=5, sticky="w")
 
-        # --- NEW SECTION: 5. LÀM MỜ SUB CŨ (FIXED BLUR) ---
-        blur_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
-        blur_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(blur_frame, text="🛡️ 5. Làm Mờ Phụ Đề Cũ (Fixed Blur)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        # --- CARD 4: 🛠️ CÔNG CỤ HỖ TRỢ (Extra Tools) ---
+        card_tools = ctk.CTkFrame(top_frame, fg_color=B_FRAME, corner_radius=15)
+        card_tools.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(card_tools, text="🛠️ 4. Công Cụ Hỗ Trợ", font=ctk.CTkFont(size=15, weight="bold"), text_color="#aaa").pack(anchor="w", padx=15, pady=(10, 5))
         
-        blur_input_row = ctk.CTkFrame(blur_frame, fg_color="transparent")
-        blur_input_row.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(blur_input_row, text="Video nguồn:").pack(side="left", padx=5)
-        self.entry_video_blur = ctk.CTkEntry(blur_input_row, width=300, placeholder_text="Chọn video để làm mờ sub...")
-        self.entry_video_blur.pack(side="left", padx=5, fill="x", expand=True)
-        ctk.CTkButton(blur_input_row, text="Chọn...", width=80, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_video_blur, [("Video", "*.mp4 *.avi *.mkv")])).pack(side="left", padx=2)
-        ctk.CTkButton(blur_input_row, text="Chọn Vùng mờ", width=120, fg_color=B_ACCENT, command=self.pick_blur_roi).pack(side="left", padx=5)
+        t_row = ctk.CTkFrame(card_tools, fg_color="transparent")
+        t_row.pack(fill="x", padx=15, pady=10)
         
-        self.btn_run_blur = ctk.CTkButton(blur_frame, text="🚀 Bắt Đầu Làm Mờ", width=150, fg_color=B_SUCCESS, font=ctk.CTkFont(weight="bold"), command=self.run_blur_process)
-        self.btn_run_blur.pack(pady=10)
+        ctk.CTkButton(t_row, text="🛡️ Làm Mờ Sub", width=150, fg_color="#2b2b2b", command=self.run_blur_process).pack(side="left", padx=5)
+        ctk.CTkButton(t_row, text="🎵 Tách Nhạc Lẻ", width=150, fg_color="#2b2b2b", command=self.run_separation).pack(side="left", padx=5)
+        ctk.CTkButton(t_row, text="📏 Chọn Vùng Mờ", width=150, fg_color=B_FRAME, border_width=1, command=self.pick_blur_roi).pack(side="left", padx=5)
 
-        # --- NEW SECTION: 6. TÁCH NHẠC NỀN (INSTRUMENTAL) ---
-        sep_frame = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR)
-        sep_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(sep_frame, text="🎵 6. Tách Nhạc Nền & SFX (Sound Separation)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
-        
-        sep_row = ctk.CTkFrame(sep_frame, fg_color="transparent")
-        sep_row.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(sep_row, text="Video/Audio:").pack(side="left", padx=5)
-        self.entry_sep_in = ctk.CTkEntry(sep_row, width=400, placeholder_text="Video cần tách nhạc nền...")
-        self.entry_sep_in.pack(side="left", padx=5, fill="x", expand=True)
-        ctk.CTkButton(sep_row, text="Chọn...", width=80, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_sep_in, [("Media", "*.mp4 *.wav *.mp3")])).pack(side="left", padx=5)
-        
-        ctk.CTkButton(sep_frame, text="🚀 TÁCH NHẠC & HIỆU ỨNG", width=220, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.run_separation).pack(pady=10)
-
-        # Action Button & Progress
-        # Action Button & Progress
-        ctk.CTkButton(top_frame, text="🚀 Bắt Đầu Chuyển Đổi", height=55, fg_color=B_ACCENT, font=ctk.CTkFont(size=18, weight="bold"), command=self.run_tab3).pack(fill="x", padx=10, pady=(20, 5))
+        # -- MAIN START BUTTON --
+        ctk.CTkButton(top_frame, text="🚀 BẮT ĐẦU CHUYỂN ĐỔI", height=70, fg_color=B_ACCENT, corner_radius=35, font=ctk.CTkFont(size=20, weight="bold"), command=self.run_tab3).pack(fill="x", padx=50, pady=(20, 10))
         
         self.main_progress = ctk.CTkProgressBar(top_frame, height=12, progress_color=B_ACCENT)
-        self.main_progress.pack(fill="x", padx=10, pady=(15, 20))
-        self.main_progress.set(1.0) # 100%
+        self.main_progress.pack(fill="x", padx=50, pady=(0, 20))
+        self.main_progress.set(1.0)
 
-        # 5. Nhật ký quá trình
-        log_frame = ctk.CTkFrame(frame, fg_color=B_SIDEBAR)
+        # --- BOTTOM AREA (SMALL LOGS) ---
+        log_frame = ctk.CTkFrame(frame, fg_color=B_SIDEBAR, height=180) # Fixed small height
         log_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        log_frame.pack_propagate(False) # Prevent shrinking
         
-        ctk.CTkLabel(log_frame, text="📜 Nhật ký quá trình", font=ctk.CTkFont(weight="bold"), text_color=B_SUCCESS).pack(anchor="w", padx=10, pady=5)
-        self.log_view = ctk.CTkTextbox(log_frame, fg_color="#0a0a0a", text_color="#00ff00", font=ctk.CTkFont(family="Consolas", size=12))
-        self.log_view.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
+        ctk.CTkLabel(log_frame, text="📜 Nhật ký quá trình (Bé bé thôi)", font=ctk.CTkFont(size=12, weight="bold"), text_color=B_SUCCESS).pack(anchor="w", padx=10, pady=2)
+        self.log_view = ctk.CTkTextbox(log_frame, fg_color="#0a0a0a", text_color="#00ee00", font=ctk.CTkFont(family="Consolas", size=11))
+        self.log_view.pack(fill="both", expand=True, padx=10, pady=(0, 5))
         return frame
 
     # Session ID logic removed per user request
@@ -594,7 +546,7 @@ class BumYTCloneExactApp(ctk.CTk):
         bgm_synced = os.path.join(self.out_dir, "bgm_synced.wav")
         srt_synced = os.path.join(self.out_dir, "vi_synced.srt")
         
-        speed_val = self.spd_slider.get()
+        speed_val = 1.0
         ffmpeg_bin = self.ffmpeg_path.get().strip()
 
         tasks = []
