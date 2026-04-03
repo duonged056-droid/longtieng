@@ -46,15 +46,15 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        # FFmpeg boxblur có giới hạn bán kính cho từng bình diện (luma/chroma).
-    # Ta tính bán kính luma-radius (lp) cực kỳ an toàn để không bao giờ bị lỗi luma hay chroma.
-    # h//4 là con số cực kỳ an toàn cho mọi định dạng pixel (YUV420, 422, 444).
-    safe_blur = max(1, min(args.blur, (args.w // 4) - 1, (args.h // 4) - 1, 30))
+        # gblur (Gaussian Blur) cho chất lượng mờ đẹp ("mờ trong") và ổn định hơn boxblur.
+    # Sigma tầm 10-20 là rất mạnh rồi. Ta không bị giới hạn kén chọn như boxblur.
+    safe_sigma = max(1.0, min(args.blur / 3.0, 20.0))
 
-    # Ta set riêng lẻ luma_radius (lp) và luma_power (l p r) để đạt độ mờ cao
-    # Giữ các plane khác ở mức tối thiểu để tránh lỗi vượt quá giới hạn plane
+    # Filter phức hợp: 
+    # [0:v] video gốc -> crop -> làm mờ Gaussian (gblur) -> gán nhãn [b]
+    # Sau đó đè [b] lên [0:v] -> gán nhãn [vout]
     f_crop = f"crop={args.w}:{args.h}:{args.x}:{args.y}"
-    f_blur = f"boxblur=lp={safe_blur}:cp=1" # lp=luma_radius, cp=chroma_radius (giữ 1 để không lỗi chroma h/2)
+    f_blur = f"gblur=sigma={safe_sigma}:steps=3"
     filter_chain = f"[0:v]{f_crop},{f_blur}[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
 
     cmd = [
@@ -63,7 +63,7 @@ def main():
         "-i", args.video_in,
         "-filter_complex", filter_chain,
         "-map", "[vout]",
-        "-map", "0:a?",    # Giữ audio
+        "-map", "0:a?",
         "-c:v", encoder,
         "-preset", preset,
         "-c:a", "copy",
