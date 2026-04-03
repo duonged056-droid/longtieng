@@ -296,6 +296,9 @@ class BumYTCloneExactApp(ctk.CTk):
         self.chk_separate_audio = ctk.CTkCheckBox(auto_opt_frame, text="🎚️ Xuất nhạc & lời riêng biệt (để chỉnh volume trong CapCut)")
         self.chk_separate_audio.select()
         self.chk_separate_audio.pack(anchor="w", pady=2)
+        
+        self.chk_all_clean = ctk.CTkCheckBox(auto_opt_frame, text="🗑️ Chế độ dọn dẹp (Xóa file nguồn/file tạm khi THÀNH CÔNG)", text_color=B_DANGER)
+        self.chk_all_clean.pack(anchor="w", pady=2)
 
         # --- NEW SECTION: 5. LÀM MỜ SUB CŨ (FIXED BLUR) ---
         blur_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
@@ -725,7 +728,26 @@ class BumYTCloneExactApp(ctk.CTk):
                 for line in iter(process.stdout.readline, ""):
                     self.log(line.strip())
                 rc = process.wait()
-                if rc != 0:
+                if rc == 0:
+                    # --- AUTO CLEANUP LOGIC ---
+                    if self.chk_all_clean.get():
+                        if "mod8_blur_sub.py" in str(cmd):
+                            # Xóa file video gốc sau khi mờ xong
+                            try:
+                                v_in_idx = cmd.index("--video_in") + 1
+                                v_in = cmd[v_in_idx]
+                                if os.path.exists(v_in):
+                                    os.remove(v_in)
+                                    self.log(f"🗑️ Đã xóa file video gốc: {os.path.basename(v_in)}")
+                            except: pass
+                        elif "mod7_video_sync.py" in str(cmd):
+                            # Xóa file lồng tiếng chưa kéo dãn (voices.wav)
+                            v_tmp = os.path.join(self.out_dir, "voices.wav")
+                            if os.path.exists(v_tmp):
+                                os.remove(v_tmp)
+                                self.log("🗑️ Đã xóa file lồng tiếng chưa đồng bộ.")
+                    # -------------------------
+                else:
                     # mod7 lỗi → chỉ warn, không dừng
                     if "mod7_video_sync" in str(cmd):
                         self.log(f"⚠️ Video Sync lỗi — sẽ dùng file gốc", level="warning")
