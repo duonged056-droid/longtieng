@@ -241,12 +241,7 @@ class BumYTCloneExactApp(ctk.CTk):
         ctk.CTkLabel(grid_opts, text="File SRT nguồn:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.entry_srt_in = ctk.CTkEntry(grid_opts, width=500)
         self.entry_srt_in.grid(row=0, column=1, padx=10, pady=5)
-        
-        srt_btn_frame = ctk.CTkFrame(grid_opts, fg_color="transparent")
-        srt_btn_frame.grid(row=0, column=2, padx=5)
-        
-        ctk.CTkButton(srt_btn_frame, text="Chọn File SRT...", width=120, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_srt_in, [("SRT", "*.srt")])).pack(side="left", padx=2)
-        ctk.CTkButton(srt_btn_frame, text="🎙️ Auto Sub (Chuẩn CapCut)", width=180, fg_color="#ff2c55", text_color="white", font=ctk.CTkFont(weight="bold"), command=self.extract_smart_srt).pack(side="left", padx=2)
+        ctk.CTkButton(grid_opts, text="Chọn File SRT...", width=120, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_srt_in, [("SRT", "*.srt")])).grid(row=0, column=2, padx=5)
 
         # Tên MP3 ra
         ctk.CTkLabel(grid_opts, text="Tên file MP3 đầu ra:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
