@@ -329,20 +329,6 @@ class BumYTCloneExactApp(ctk.CTk):
         ctk.CTkButton(sep_row, text="Chọn...", width=80, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_sep_in, [("Media", "*.mp4 *.wav *.mp3")])).pack(side="left", padx=5)
         
         ctk.CTkButton(sep_frame, text="🚀 TÁCH NHẠC & HIỆU ỨNG", width=220, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.run_separation).pack(pady=10)
-        
-        # --- NEW SECTION: 7. TẠO PHỤ ĐỀ GỐC (AI AUTO SUB) ---
-        asr_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
-        asr_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(asr_frame, text="🎙️ 7. Tạo Phụ Đề Gốc (AI Auto Sub)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
-        
-        asr_row = ctk.CTkFrame(asr_frame, fg_color="transparent")
-        asr_row.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(asr_row, text="Video nguồn:").pack(side="left", padx=5)
-        self.entry_video_asr = ctk.CTkEntry(asr_row, width=400, placeholder_text="Video cần tạo phụ đề...")
-        self.entry_video_asr.pack(side="left", padx=5, fill="x", expand=True)
-        ctk.CTkButton(asr_row, text="Chọn...", width=80, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_video_asr, [("Video", "*.mp4 *.avi *.mkv")])).pack(side="left", padx=5)
-        
-        ctk.CTkButton(asr_frame, text="🚀 TRÍCH XUẤT PHỤ ĐỀ GỐC (AI)", width=240, fg_color="#ff2c55", text_color="white", font=ctk.CTkFont(weight="bold"), command=self.extract_smart_srt).pack(pady=10)
 
         # Action Button & Progress
         # Action Button & Progress
@@ -542,67 +528,6 @@ class BumYTCloneExactApp(ctk.CTk):
         else:
             self.opt_voice_id.configure(values=["Google Nữ", "Google Nam"])
             self.opt_voice_id.set("Google Nữ")
-
-    def extract_smart_srt(self):
-        # Chỉ lấy từ Section 7 theo yêu cầu người dùng (không lấy chéo video từ bước 3)
-        v_in = self.entry_video_asr.get().strip()
-            
-        if not v_in or not os.path.exists(v_in):
-            messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn trong Section 7 để tạo Sub!")
-            return
-            
-        def process():
-            self.log("\n>>> BẮT ĐẦU TRÍCH XUẤT SUB TỰ ĐỘNG (ASR AI)...")
-            temp_audio = os.path.join(self.out_dir, "temp_vocals.wav")
-            ffmpeg_bin = self.ffmpeg_path.get().strip()
-            
-            # Bước 1: Trích xuất Audio 16kHz mono
-            self.log("> Đang trích xuất âm thanh (FFmpeg)...")
-            cmd_ff = [
-                ffmpeg_bin, "-y", "-i", v_in,
-                "-ar", "16000", "-ac", "1", "-vn", temp_audio
-            ]
-            try:
-                subprocess.run(cmd_ff, check=True, creationflags=0x08000000 if sys.platform == "win32" else 0)
-            except Exception as e:
-                self.log(f"❌ Lỗi FFmpeg: {e}", level="warning")
-                return
-
-            # Bước 2: Chạy mod2_asr.py
-            self.log("> Đang chạy nhận dạng giọng nói (ASR)...")
-            cmd_asr = [
-                get_python(), "mod2_asr.py",
-                "--audio_in", temp_audio,
-                "--output_dir", self.out_dir,
-                "--out_name", "capcut_smart_sub",
-                "--batch_size", "4"
-            ]
-            
-            env = os.environ.copy()
-            env["PYTHONIOENCODING"] = "utf-8"
-            kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
-            
-            try:
-                proc = subprocess.Popen(cmd_asr, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=env, **kwargs)
-                for line in iter(proc.stdout.readline, ""):
-                    self.log(line.strip())
-                proc.wait()
-                
-                srt_out = os.path.join(self.out_dir, "capcut_smart_sub.srt")
-                if os.path.exists(srt_out):
-                    self.after(0, lambda: (self.entry_srt_in.delete(0, 'end'), self.entry_srt_in.insert(0, srt_out)))
-                    self.log(f"✅ Đã tạo Sub tự động thành công: {srt_out}", level="success")
-                else:
-                    self.log("❌ Không tìm thấy file SRT đầu ra.", level="warning")
-                    
-            except Exception as e:
-                self.log(f"❌ Lỗi ASR: {e}", level="warning")
-            finally:
-                if os.path.exists(temp_audio):
-                    try: os.remove(temp_audio)
-                    except: pass
-
-        threading.Thread(target=process, daemon=True).start()
 
     def run_tab3(self):
         custom_srt = self.entry_srt_in.get().strip()
