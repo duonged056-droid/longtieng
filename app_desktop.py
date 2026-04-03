@@ -143,24 +143,6 @@ class BumYTCloneExactApp(ctk.CTk):
         e_openai = ctk.CTkEntry(frame, width=500, show="*")
         e_openai.pack(pady=(0, 15))
         e_openai.insert(0, os.environ.get("OPENAI_API_KEY", ""))
-
-        settings_row = ctk.CTkFrame(frame, fg_color="transparent")
-        settings_row.pack(fill="x", pady=(0, 15))
-
-        ctk.CTkLabel(settings_row, text="Dịch thuật mặc định:").grid(row=0, column=0, padx=5, sticky="w")
-        e_service = ctk.CTkOptionMenu(settings_row, values=["gemini", "google", "openai"], width=150)
-        e_service.set(os.environ.get("TRANS_SERVICE", "gemini"))
-        e_service.grid(row=0, column=1, padx=5)
-
-        ctk.CTkLabel(settings_row, text="Từ (From):").grid(row=0, column=2, padx=5, sticky="w")
-        e_from = ctk.CTkEntry(settings_row, width=60)
-        e_from.insert(0, os.environ.get("TRANS_FROM", "zh"))
-        e_from.grid(row=0, column=3, padx=5)
-
-        ctk.CTkLabel(settings_row, text="Sang (To):").grid(row=0, column=4, padx=5, sticky="w")
-        e_to = ctk.CTkEntry(settings_row, width=60)
-        e_to.insert(0, os.environ.get("TRANS_TO", "vi"))
-        e_to.grid(row=0, column=5, padx=5)
         
         ctk.CTkLabel(frame, text="System Prompt (Dịch thuật):").pack(anchor="w", pady=(0, 5))
         e_prompt = ctk.CTkTextbox(frame, width=500, height=80)
@@ -179,9 +161,6 @@ class BumYTCloneExactApp(ctk.CTk):
                             
             env_content["GEMINI_API_KEY"] = e_gemini.get()
             env_content["OPENAI_API_KEY"] = e_openai.get()
-            env_content["TRANS_SERVICE"] = e_service.get()
-            env_content["TRANS_FROM"] = e_from.get()
-            env_content["TRANS_TO"] = e_to.get()
             env_content["SYSTEM_PROMPT"] = e_prompt.get("0.0", tk.END).strip().replace("\n", " ")
             
             with open(".env", "w", encoding="utf-8") as f:
@@ -214,45 +193,6 @@ class BumYTCloneExactApp(ctk.CTk):
         top_frame = ctk.CTkScrollableFrame(frame, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         
-        # 0. Translation Logic (UPGRADED)
-        trans_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
-        trans_frame.pack(fill="x", padx=10, pady=(10, 5))
-        ctk.CTkLabel(trans_frame, text="🌐 1. Dịch Thuật SRT (Gemini / Google Free)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
-        
-        # File Input Row
-        trans_file_row = ctk.CTkFrame(trans_frame, fg_color="transparent")
-        trans_file_row.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(trans_file_row, text="File nguồn:").pack(side="left", padx=5)
-        self.entry_srt_trans_in = ctk.CTkEntry(trans_file_row, width=350, placeholder_text="Chọn file SRT để dịch...")
-        self.entry_srt_trans_in.pack(side="left", padx=5, fill="x", expand=True)
-        ctk.CTkButton(trans_file_row, text="Chọn SRT...", width=100, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_srt_trans_in, [("SRT", "*.srt")])).pack(side="right", padx=5)
-
-        # Config Row
-        trans_input_row = ctk.CTkFrame(trans_frame, fg_color="transparent")
-        trans_input_row.pack(fill="x", padx=10, pady=5)
-        
-        ctk.CTkLabel(trans_input_row, text="Dịch vụ:").pack(side="left", padx=5)
-        self.opt_trans_srv = ctk.CTkOptionMenu(trans_input_row, values=["gemini", "google", "openai"], width=90, fg_color=B_SIDEBAR)
-        self.opt_trans_srv.set(os.environ.get("TRANS_SERVICE", "gemini"))
-        self.opt_trans_srv.pack(side="left", padx=5)
-        
-        ctk.CTkLabel(trans_input_row, text="Từ:").pack(side="left", padx=5)
-        self.opt_trans_from = ctk.CTkOptionMenu(trans_input_row, values=["zh", "en", "ja", "ko", "auto"], width=70, fg_color=B_SIDEBAR)
-        self.opt_trans_from.set(os.environ.get("TRANS_FROM", "zh"))
-        self.opt_trans_from.pack(side="left", padx=5)
-
-        ctk.CTkLabel(trans_input_row, text="Sang:").pack(side="left", padx=5)
-        self.opt_trans_to = ctk.CTkOptionMenu(trans_input_row, values=["vi", "en", "zh"], width=70, fg_color=B_SIDEBAR)
-        self.opt_trans_to.set(os.environ.get("TRANS_TO", "vi"))
-        self.opt_trans_to.pack(side="left", padx=5)
-
-        ctk.CTkLabel(trans_input_row, text="File ra:").pack(side="left", padx=5)
-        self.entry_srt_out_name = ctk.CTkEntry(trans_input_row, width=150)
-        self.entry_srt_out_name.insert(0, "capcut/vi_translated.srt")
-        self.entry_srt_out_name.pack(side="left", padx=5, fill="x", expand=True)
-        
-        ctk.CTkButton(trans_input_row, text="🚀 DỊCH NGAY", width=120, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.run_translation).pack(side="right", padx=5)
-
         # 1. TTS Provider Config
         tts_frame = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR)
         tts_frame.pack(fill="x", padx=10, pady=5)
@@ -365,37 +305,6 @@ class BumYTCloneExactApp(ctk.CTk):
         return frame
 
     # Session ID logic removed per user request
-
-    def run_translation(self):
-        srt_in = self.entry_srt_trans_in.get().strip()
-        srt_out = self.entry_srt_out_name.get().strip()
-        service = self.opt_trans_srv.get()
-        from_lang = self.opt_trans_from.get()
-        to_lang = self.opt_trans_to.get()
-        
-        if not srt_in or not os.path.exists(srt_in):
-            messagebox.showerror("Lỗi", "Vui lòng chọn File SRT nguồn để dịch!")
-            return
-            
-        self.log(f"\n>>> BẮT ĐẦU DỊCH THUẬT: {from_lang} -> {to_lang} ({service})...")
-        
-        cmd = [
-            get_python(), "mod3_translate.py",
-            "--srt_in", srt_in,
-            "--srt_out", srt_out,
-            "--service", service,
-            "--from_lang", from_lang,
-            "--to_lang", to_lang
-        ]
-        
-        def on_done():
-            self.entry_srt_in.delete(0, tk.END)
-            self.entry_srt_in.insert(0, srt_out)
-            self.log(f"✅ Dịch xong! Kết quả lưu tại: {srt_out}", level="success")
-            messagebox.showinfo("Thành công", f"Đã dịch xong SRT sang {srt_out}. File đã được tự động nạp vào bước Dubbing.")
-
-        # Updated _run_cmds with callback support could be better, but for now we rely on the sequence
-        threading.Thread(target=self._run_cmds, args=([cmd], "DỊCH THÀNH CÔNG!")).start()
 
     def update_voice_options(self, choice):
         if "TikTok" in choice:
