@@ -286,6 +286,36 @@ class BumYTCloneExactApp(ctk.CTk):
         self.chk_capcut.pack(anchor="w", pady=2)
         self.chk_capcut.select()  # Mặc định bật
 
+        # --- NEW SECTION: 5. LÀM MỜ SUB CŨ (FIXED BLUR) ---
+        blur_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
+        blur_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(blur_frame, text="🛡️ 5. Làm Mờ Phụ Đề Cũ (Fixed Blur)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        blur_input_row = ctk.CTkFrame(blur_frame, fg_color="transparent")
+        blur_input_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(blur_input_row, text="Video nguồn:").pack(side="left", padx=5)
+        self.entry_video_blur = ctk.CTkEntry(blur_input_row, width=300, placeholder_text="Chọn video để làm mờ sub...")
+        self.entry_video_blur.pack(side="left", padx=5, fill="x", expand=True)
+        ctk.CTkButton(blur_input_row, text="Chọn...", width=80, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_video_blur, [("Video", "*.mp4 *.avi *.mkv")])).pack(side="left", padx=2)
+        ctk.CTkButton(blur_input_row, text="Chọn Vùng mờ", width=120, fg_color=B_ACCENT, command=self.pick_blur_roi).pack(side="left", padx=5)
+        
+        self.btn_run_blur = ctk.CTkButton(blur_frame, text="🚀 Bắt Đầu Làm Mờ", width=150, fg_color=B_SUCCESS, font=ctk.CTkFont(weight="bold"), command=self.run_blur_process)
+        self.btn_run_blur.pack(pady=10)
+
+        # --- NEW SECTION: 6. TÁCH NHẠC NỀN (INSTRUMENTAL) ---
+        sep_frame = ctk.CTkFrame(top_frame, fg_color=B_SIDEBAR)
+        sep_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(sep_frame, text="🎵 6. Tách Nhạc Nền & SFX (Sound Separation)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        sep_row = ctk.CTkFrame(sep_frame, fg_color="transparent")
+        sep_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(sep_row, text="Video/Audio:").pack(side="left", padx=5)
+        self.entry_sep_in = ctk.CTkEntry(sep_row, width=400, placeholder_text="Video cần tách nhạc nền...")
+        self.entry_sep_in.pack(side="left", padx=5, fill="x", expand=True)
+        ctk.CTkButton(sep_row, text="Chọn...", width=80, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_sep_in, [("Media", "*.mp4 *.wav *.mp3")])).pack(side="left", padx=5)
+        
+        ctk.CTkButton(sep_frame, text="🚀 TÁCH NHẠC & HIỆU ỨNG", width=220, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.run_separation).pack(pady=10)
+
         # Action Button & Progress
         # Action Button & Progress
         ctk.CTkButton(top_frame, text="🚀 Bắt Đầu Chuyển Đổi", height=55, fg_color=B_ACCENT, font=ctk.CTkFont(size=18, weight="bold"), command=self.run_tab3).pack(fill="x", padx=10, pady=(20, 5))
@@ -305,6 +335,154 @@ class BumYTCloneExactApp(ctk.CTk):
         return frame
 
     # Session ID logic removed per user request
+
+    # ==========================================================
+    # LÀM MỜ VÙNG CHỌN (ROI SELECTOR)
+    # ==========================================================
+
+    def pick_blur_roi(self):
+        if not HAS_CV2:
+            messagebox.showerror("Lỗi", "Vui lòng cài đặt opencv-python và Pillow để dùng tính năng này!")
+            return
+            
+        video_in = self.entry_video_blur.get().strip()
+        if not video_in or not os.path.exists(video_in):
+            messagebox.showerror("Lỗi", "Vui lòng chọn Video trước khi chọn vùng!")
+            return
+            
+        self.roi_win = ctk.CTkToplevel(self)
+        self.roi_win.title("Chọn vùng làm mờ (Kéo chuột để vẽ hình chữ nhật)")
+        self.roi_win.geometry("1000x800")
+        self.roi_win.attributes("-topmost", True)
+        
+        self.cap = cv2.VideoCapture(video_in)
+        self.video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        self.roi_canvas = tk.Canvas(self.roi_win, bg="black", cursor="cross")
+        self.roi_canvas.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        self.roi_slider = ctk.CTkSlider(self.roi_win, from_=0, to=self.total_frames-1, command=lambda v: self._update_roi_frame(int(float(v))))
+        self.roi_slider.set(0)
+        self.roi_slider.pack(fill="x", padx=40, pady=10)
+        
+        self.roi_canvas.bind("<ButtonPress-1>", self._on_roi_press)
+        self.roi_canvas.bind("<B1-Motion>", self._on_roi_drag)
+        self.roi_canvas.bind("<ButtonRelease-1>", self._on_roi_release)
+        
+        self.start_x = None
+        self.start_y = None
+        self.roi_rect_id = None
+        self.scale_f = 1.0
+        
+        self._update_roi_frame(0)
+
+    def _update_roi_frame(self, frame_idx):
+        if not self.cap: return
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        success, frame = self.cap.read()
+        if not success: return
+        
+        # Resize to fit canvas
+        cw = self.roi_canvas.winfo_width()
+        ch = self.roi_canvas.winfo_height()
+        if cw < 100: cw = 900 # Default if winfo not ready
+        if ch < 100: ch = 600
+
+        self.scale_f = min(cw/self.video_w, ch/self.video_h)
+        nw = int(self.video_w * self.scale_f)
+        nh = int(self.video_h * self.scale_f)
+        
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame_rgb)
+        img_resized = img.resize((nw, nh), Image.Resampling.LANCZOS)
+        
+        self.tk_image = ImageTk.PhotoImage(img_resized)
+        self.roi_canvas.delete("all")
+        self.roi_canvas.create_image(cw//2, ch//2, image=self.tk_image, anchor="center")
+        
+        # Redraw existing ROI if any
+        if self.roi_coords:
+            x, y, w, h = self.roi_coords
+            x1 = (x * self.scale_f) + (cw - nw) // 2
+            y1 = (y * self.scale_f) + (ch - nh) // 2
+            x2 = x1 + (w * self.scale_f)
+            y2 = y1 + (h * self.scale_f)
+            self.roi_canvas.create_rectangle(x1, y1, x2, y2, outline="red", width=3)
+
+    def _on_roi_press(self, event):
+        self.start_x = event.x
+        self.start_y = event.y
+        if self.roi_rect_id: self.roi_canvas.delete(self.roi_rect_id)
+        self.roi_rect_id = self.roi_canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=3)
+
+    def _on_roi_drag(self, event):
+        self.roi_canvas.coords(self.roi_rect_id, self.start_x, self.start_y, event.x, event.y)
+
+    def _on_roi_release(self, event):
+        # Calculate real video coordinates
+        cw = self.roi_canvas.winfo_width()
+        ch = self.roi_canvas.winfo_height()
+        nw = int(self.video_w * self.scale_f)
+        nh = int(self.video_h * self.scale_f)
+        
+        off_x = (cw - nw) // 2
+        off_y = (ch - nh) // 2
+        
+        # Real coords
+        rx1 = (min(self.start_x, event.x) - off_x) / self.scale_f
+        ry1 = (min(self.start_y, event.y) - off_y) / self.scale_f
+        rx2 = (max(self.start_x, event.x) - off_x) / self.scale_f
+        ry2 = (max(self.start_y, event.y) - off_y) / self.scale_f
+        
+        # Clamp to video bounds
+        rx1 = max(0, min(self.video_w, rx1))
+        ry1 = max(0, min(self.video_h, ry1))
+        rx2 = max(0, min(self.video_w, rx2))
+        ry2 = max(0, min(self.video_h, ry2))
+        
+        self.roi_coords = (int(rx1), int(ry1), int(rx2-rx1), int(ry2-ry1))
+        self.log(f"📍 Đã chọn vùng Blur: x={self.roi_coords[0]}, y={self.roi_coords[1]}, w={self.roi_coords[2]}, h={self.roi_coords[3]}")
+
+    def run_blur_process(self):
+        video_in = self.entry_video_blur.get().strip()
+        if not video_in or not os.path.exists(video_in):
+            messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn!")
+            return
+        if not self.roi_coords:
+            messagebox.showerror("Lỗi", "Vui lòng 'Chọn vùng mờ' trước!")
+            return
+            
+        video_out = os.path.join(self.out_dir, "video_blurred.mp4")
+        self.log(f"\n>>> BẮT ĐẦU LÀM MỜ VÙNG: {video_in}...")
+        
+        cmd = [
+            get_python(), "mod8_blur_sub.py",
+            "--video_in", video_in,
+            "--video_out", video_out,
+            "--x", str(self.roi_coords[0]),
+            "--y", str(self.roi_coords[1]),
+            "--w", str(self.roi_coords[2]),
+            "--h", str(self.roi_coords[3]),
+            "--blur", "51"
+        ]
+        
+        threading.Thread(target=self._run_cmds, args=([cmd], "LÀM MỜ THÀNH CÔNG!")).start()
+
+    def run_separation(self):
+        v_in = self.entry_sep_in.get().strip()
+        if not v_in or not os.path.exists(v_in):
+            messagebox.showerror("Lỗi", "Vui lòng chọn Video/Audio để tách!")
+            return
+            
+        self.log("\n>>> BẮT ĐẦU TÁCH ÂM THANH (Demucs AI)...")
+        cmd = [
+            get_python(), "mod1_demucs.py",
+            "--video_in", v_in,
+            "--output_dir", self.out_dir
+        ]
+        threading.Thread(target=self._run_cmds, args=([cmd], "TÁCH ÂM THÀNH CÔNG!")).start()
 
     def update_voice_options(self, choice):
         if "TikTok" in choice:
