@@ -334,6 +334,20 @@ class BumYTCloneExactApp(ctk.CTk):
         ctk.CTkButton(sep_row, text="Chọn...", width=80, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_sep_in, [("Media", "*.mp4 *.wav *.mp3")])).pack(side="left", padx=5)
         
         ctk.CTkButton(sep_frame, text="🚀 TÁCH NHẠC & HIỆU ỨNG", width=220, fg_color=B_ACCENT, font=ctk.CTkFont(weight="bold"), command=self.run_separation).pack(pady=10)
+        
+        # --- NEW SECTION: 7. TẠO PHỤ ĐỀ GỐC (AI AUTO SUB) ---
+        asr_frame = ctk.CTkFrame(top_frame, fg_color=B_FRAME)
+        asr_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(asr_frame, text="🎙️ 7. Tạo Phụ Đề Gốc (AI Auto Sub)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        asr_row = ctk.CTkFrame(asr_frame, fg_color="transparent")
+        asr_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(asr_row, text="Video nguồn:").pack(side="left", padx=5)
+        self.entry_video_asr = ctk.CTkEntry(asr_row, width=400, placeholder_text="Video cần tạo phụ đề...")
+        self.entry_video_asr.pack(side="left", padx=5, fill="x", expand=True)
+        ctk.CTkButton(asr_row, text="Chọn...", width=80, fg_color=B_SIDEBAR, command=lambda: self.pick_file(self.entry_video_asr, [("Video", "*.mp4 *.avi *.mkv")])).pack(side="left", padx=5)
+        
+        ctk.CTkButton(asr_frame, text="🚀 TRÍCH XUẤT PHỤ ĐỀ GỐC (AI)", width=240, fg_color="#ff2c55", text_color="white", font=ctk.CTkFont(weight="bold"), command=self.extract_smart_srt).pack(pady=10)
 
         # Action Button & Progress
         # Action Button & Progress
@@ -535,7 +549,11 @@ class BumYTCloneExactApp(ctk.CTk):
             self.opt_voice_id.set("Google Nữ")
 
     def extract_smart_srt(self):
-        v_in = self.entry_video_t3.get().strip()
+        # Ưu tiên lấy từ Section 7, nếu trống thì lấy từ Section 3
+        v_in = self.entry_video_asr.get().strip()
+        if not v_in:
+            v_in = self.entry_video_t3.get().strip()
+            
         if not v_in or not os.path.exists(v_in):
             messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn để tạo Sub tự động!")
             return
