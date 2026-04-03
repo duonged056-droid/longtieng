@@ -544,13 +544,11 @@ class BumYTCloneExactApp(ctk.CTk):
             self.opt_voice_id.set("Google Nữ")
 
     def extract_smart_srt(self):
-        # Ưu tiên lấy từ Section 7, nếu trống thì lấy từ Section 3
+        # Chỉ lấy từ Section 7 theo yêu cầu người dùng (không lấy chéo video từ bước 3)
         v_in = self.entry_video_asr.get().strip()
-        if not v_in:
-            v_in = self.entry_video_t3.get().strip()
             
         if not v_in or not os.path.exists(v_in):
-            messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn để tạo Sub tự động!")
+            messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn trong Section 7 để tạo Sub!")
             return
             
         def process():
