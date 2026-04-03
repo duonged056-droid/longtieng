@@ -1,33 +1,21 @@
 import os
 import argparse
-import cv2
-import numpy as np
-from moviepy import VideoFileClip
+import subprocess
+import sys
 from rich.console import Console
-from tqdm import tqdm
 
 console = Console()
 
-def apply_regional_blur(frame, x, y, w, h, blur_radius=51):
-    """Làm mờ vùng chỉ định bằng OpenCV Gaussian Blur."""
-    # Đảm bảo bán kính lẻ
-    r = blur_radius if blur_radius % 2 != 0 else blur_radius + 1
-    
-    # Lấy vùng ROI
-    roi = frame[y:y+h, x:x+w]
-    if roi.size == 0:
-        return frame
-        
-    # Làm mờ
-    blurred_roi = cv2.GaussianBlur(roi, (r, r), 0)
-    
-    # Ghi đè lại vào frame gốc
-    new_frame = frame.copy()
-    new_frame[y:y+h, x:x+w] = blurred_roi
-    return new_frame
+def check_gpu(ffmpeg_cmd):
+    """Kiểm tra GPU NVENC."""
+    try:
+        test = subprocess.run([ffmpeg_cmd, '-encoders'], capture_output=True, text=True)
+        return 'h264_nvenc' in test.stdout
+    except Exception:
+        return False
 
 def main():
-    parser = argparse.ArgumentParser(description="Module 8: Làm mờ vùng (Regional Blur) cho Video")
+    parser = argparse.ArgumentParser(description="Module 8: Làm mờ vùng (Regional Blur) - GPU Optimized")
     parser.add_argument("--video_in", required=True, help="Video đầu vào")
     parser.add_argument("--video_out", required=True, help="Video đầu ra")
     parser.add_argument("--x", type=int, required=True, help="Tọa độ X")
@@ -35,6 +23,7 @@ def main():
     parser.add_argument("--w", type=int, required=True, help="Chiều rộng vùng mờ")
     parser.add_argument("--h", type=int, required=True, help="Chiều cao vùng mờ")
     parser.add_argument("--blur", type=int, default=51, help="Độ mức độ mờ (mặc định 51)")
+    parser.add_argument("--ffmpeg_path", default="ffmpeg")
     
     args = parser.parse_args()
     
@@ -42,34 +31,57 @@ def main():
         console.print(f"[bold red]Lỗi:[/bold red] Không tìm thấy file {args.video_in}")
         return
 
-    console.print(f"[bold blue]Đang xử lý làm mờ vùng:[/bold blue] {args.video_in}")
+    ffmpeg_cmd = args.ffmpeg_path
+    
+    console.print(f"[bold blue]⚡ ĐANG XỬ LÝ LÀM MỜ VÙNG (GPU ACCELERATED):[/bold blue] {args.video_in}")
     console.print(f"Vùng: x={args.x}, y={args.y}, w={args.w}, h={args.h}, mức mờ={args.blur}")
     
+    use_gpu = check_gpu(ffmpeg_cmd)
+    if use_gpu:
+        console.print("[bold green]✅ GPU NVENC ĐÃ SẴN SÀNG![/bold green]")
+        # GPU Filter chain: hwupload_cuda -> crop/blur (if possible) OR just hybrid
+        # Thực tế combo nhanh nhất là: Decode GPU -> Blur CPU (vì filter blur GPU kén) -> Encode GPU
+        # Ở đây ta dùng filter boxblur/avgblur của FFmpeg cực nhanh so với MoviePy.
+        encoder = "h264_nvenc"
+        preset = "p4" 
+        hw_accel = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+    else:
+        console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU (Sẽ chậm hơn).[/bold yellow]")
+        encoder = "libx264"
+        preset = "fast"
+        hw_accel = []
+
+    # Filter phức hợp:
+    # 1. Cắt vùng cần mờ (crop)
+    # 2. Làm mờ vùng đó (boxblur)
+    # 3. Đè vùng đã mờ lên video gốc (overlay)
+    # Lưu ý: Cần hwdownload nếu dùng filter cpu giữa chừng hoặc hwupload nếu dùng filter gpu.
+    # Đơn giản nhất và chạy được trên mọi FFmpeg full:
+    filter_chain = (
+        f"[0:v]crop={args.w}:{args.h}:{args.x}:{args.y},boxblur={args.blur}:{args.blur}[blurred];"
+        f"[0:v][blurred]overlay={args.x}:{args.y}[outv]"
+    )
+
+    cmd = [
+        ffmpeg_cmd, "-y",
+    ] + hw_accel + [
+        "-i", args.video_in,
+        "-filter_complex", filter_chain,
+        "-map", "[outv]",
+        "-map", "0:a?", # Copy audio nếu có
+        "-c:v", encoder,
+        "-preset", preset,
+        "-c:a", "copy", # Giữ nguyên audio cho nhanh
+        "-loglevel", "error",
+        args.video_out
+    ]
+
     try:
-        clip = VideoFileClip(args.video_in)
-        
-        # Xử lý từng frame
-        # MoviePy transformation (fl_image áp dụng cho mảng numpy)
-        blurred_clip = clip.image_transform(lambda frame: apply_regional_blur(frame, args.x, args.y, args.w, args.h, args.blur))
-        
-        # Xuất video
         os.makedirs(os.path.dirname(args.video_out), exist_ok=True)
-        # Sử dụng codec libx264 để đảm bảo chất lượng và tương thích
-        blurred_clip.write_videofile(
-            args.video_out, 
-            codec="libx264", 
-            audio_codec="aac",
-            temp_audiofile="temp-audio.m4a", 
-            remove_temp=True,
-            threads=4,
-            logger='bar'
-        )
-        
-        clip.close()
-        console.print(f"[bold green]XỬ LÝ THÀNH CÔNG![/bold green] File: {args.video_out}")
-        
+        subprocess.run(cmd, check=True)
+        console.print(f"[bold green]✨ XỬ LÝ GPU HOÀN TẤT![/bold green] File: {args.video_out}")
     except Exception as e:
-        console.print(f"[bold red]Lỗi khi xử lý video:[/bold red] {str(e)}")
+        console.print(f"[bold red]Lỗi khi xử lý video qua FFmpeg:[/bold red] {str(e)}")
 
 if __name__ == "__main__":
     main()

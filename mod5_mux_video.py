@@ -38,6 +38,7 @@ def mux_video(video_in, tts_in, bgm_in, srt_vi_in, blur_box, video_out):
     # Lệnh FFmpeg tổng hợp
     cmd = [
         "ffmpeg", "-y",
+        "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
         "-i", video_in,
         "-i", tts_in
     ]

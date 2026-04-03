@@ -454,7 +454,8 @@ class BumYTCloneExactApp(ctk.CTk):
             "--y", str(self.roi_coords[1]),
             "--w", str(self.roi_coords[2]),
             "--h", str(self.roi_coords[3]),
-            "--blur", "51"
+            "--blur", "51",
+            "--ffmpeg_path", self.ffmpeg_path.get().strip()
         ]
         
         threading.Thread(target=self._run_cmds, args=([cmd], "LÀM MỜ THÀNH CÔNG!")).start()
