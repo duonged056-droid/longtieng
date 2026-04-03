@@ -39,23 +39,23 @@ def main():
     use_gpu = check_gpu(ffmpeg_cmd)
     if use_gpu:
         console.print("[bold green]✅ GPU NVENC ĐÃ SẴN SÀNG![/bold green]")
-        # SỬA LỖI: Bỏ -hwaccel_output_format cuda để filter CPU (boxblur) có thể làm việc với GPU decoder.
         encoder = "h264_nvenc"
         preset = "p4" 
         hw_accel = ["-hwaccel", "cuda"]
     else:
-        console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU (Sẽ chậm hơn).[/bold yellow]")
+        console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
         hw_accel = []
 
-    # Filter phức hợp: 
-    # [0:v] là video gốc -> trích xuất vùng -> làm mờ -> gán nhãn [blurred]
-    # Sau đó đè [blurred] lên video gốc [0:v] -> gán nhãn [outv]
-    filter_chain = (
-        f"[0:v]crop={args.w}:{args.h}:{args.x}:{args.y},boxblur={args.blur}:{args.blur}[blurred];"
-        f"[0:v][blurred]overlay={args.x}:{args.y}[outv]"
-    )
+    # FFmpeg boxblur radius giới hạn tối đa là 40. Ta cap lại để tránh lỗi.
+    safe_blur = min(args.blur, 40)
+
+    # Filter phức hợp: cắt vùng -> làm mờ -> đè lên gốc
+    # Đảm bảo chuỗi filter là duy nhất và không bị ngắt quãng.
+    f_crop = f"crop={args.w}:{args.h}:{args.x}:{args.y}"
+    f_blur = f"boxblur={safe_blur}:{safe_blur}"
+    filter_chain = f"[0:v]{f_crop},{f_blur}[bg];[0:v][bg]overlay={args.x}:{args.y}[outv]"
 
     cmd = [
         ffmpeg_cmd, "-y",
@@ -63,7 +63,7 @@ def main():
         "-i", args.video_in,
         "-filter_complex", filter_chain,
         "-map", "[outv]",
-        "-map", "0:a?",    # Copy audio nếu có
+        "-map", "0:a?",    # Giữ âm thanh nếu có
         "-c:v", encoder,
         "-preset", preset,
         "-c:a", "copy",
