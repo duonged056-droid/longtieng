@@ -46,26 +46,18 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        # Sử dụng bộ lọc "delogo" để đạt yêu cầu "cùng màu với nền video đằng sau".
-    # delogo nội suy từ các pixel xung quanh vùng chọn để lấp đầy, giúp xóa vết chữ cực kỳ tự nhiên.
-    # Ta kết hợp delogo + một chút gblur nhẹ để làm mịn vùng nội suy.
-    
-    # 1. Trích xuất vùng (crop)
-    # 2. Xóa bằng delogo (nội suy màu từ môi trường)
-    # 3. Làm mịn bằng gblur (sigma thấp để không bị loang màu)
-    f_crop = f"crop={args.w}:{args.h}:{args.x}:{args.y}"
-    f_delogo = f"delogo=x=0:y=0:w={args.w}:h={args.h}:band=1" 
-    f_blur = f"gblur=sigma=10:steps=1"
-    
-    filter_chain = f"[0:v]{f_crop},{f_delogo},{f_blur}[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
+        # delogo đã tích hợp sẵn x, y, w, h nên không cần crop + overlay phức tạp.
+    # Điều này giúp loại bỏ hoàn toàn việc dùng nhãn [vout] hay [b], tránh bị lỗi do hệ thống xóa dấu ngoặc vuông.
+    # SỬA LỖI: Bỏ 'band=1' vì bản FFmpeg mới của bạn đã loại bỏ tùy chọn này.
+    filter_val = f"delogo=x={args.x}:y={args.y}:w={args.w}:h={args.h}"
 
     cmd = [
         ffmpeg_cmd, "-y",
     ] + hw_accel + [
         "-i", args.video_in,
-        "-filter_complex", filter_chain,
-        "-map", "[vout]",
-        "-map", "0:a?",
+        "-vf", filter_val,
+        "-map", "0:v",     # Chỉ định rõ lấy video
+        "-map", "0:a?",    # Lấy audio nếu có
         "-c:v", encoder,
         "-preset", preset,
         "-c:a", "copy",
