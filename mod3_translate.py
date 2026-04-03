@@ -22,23 +22,30 @@ DEFAULT_MODEL = 'gemini-2.0-flash'
 OPENAI_MODEL = 'gpt-4o-mini' # Model OpenAI mặc định (ngon bổ rẻ)
 
 def clean_json_response(text):
-    """Sạch dữ liệu JSON trả về từ AI để parse được."""
+    """Sạch dữ liệu JSON trả về từ AI để đảm bảo parse được mảng hoặc đối tượng."""
+    if not text: return ""
     text = text.strip()
-    # Loại bỏ code blocks nếu có
-    if text.startswith("```json"):
-        text = text[7:]
-    if text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
+    # Loại bỏ các khối code ```json ... ```
+    text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
     text = text.strip()
     
-    # Đôi khi AI trả về các ký tự lạ hoặc comment
-    # Tìm đoạn JSON list đầu tiên và cuối cùng
-    start_idx = text.find('[')
-    end_idx = text.rfind(']')
-    if start_idx != -1 and end_idx != -1:
-        return text[start_idx : end_idx + 1]
+    # Tìm kiếm mảng JSON [] hoặc đối tượng JSON {}
+    start_bracket = text.find('[')
+    start_brace = text.find('{')
+    
+    # Ưu tiên tìm mảng trước cho dịch batch
+    if start_bracket != -1:
+        end_bracket = text.rfind(']')
+        if end_bracket != -1:
+            return text[start_bracket : end_bracket + 1]
+    
+    if start_brace != -1:
+        end_brace = text.rfind('}')
+        if end_brace != -1:
+            return text[start_brace : end_brace + 1]
+            
     return text
 
 def translate_google(texts, to_lang='vi', from_lang='zh'):
@@ -46,18 +53,17 @@ def translate_google(texts, to_lang='vi', from_lang='zh'):
     # Map zh -> zh-CN for Google
     f_lang = 'zh-CN' if from_lang == 'zh' else from_lang
     
-    # Thử dịch bằng Google trước
+    # Thử dịch bằng các engine miễn phí
     engines = ['google', 'bing']
     for engine in engines:
         try:
             results = ts.translate_text(texts, from_language=f_lang, to_language=to_lang, translator=engine)
             if results:
-                if isinstance(results, str):
-                    return [results]
+                if isinstance(results, str): return [results]
                 return results
         except Exception as e:
             console.print(f"[yellow]Lỗi {engine} Translate:[/yellow] {e}. Đang thử engine khác...")
-            time.sleep(2)
+            time.sleep(1)
             
     return [None] * len(texts)
 
@@ -92,18 +98,13 @@ def translate_openai(texts, glossary=None, from_lang='zh', model_name=OPENAI_MOD
         )
         
         txt = response.choices[0].message.content
-        # OpenAI đôi khi trả về object {"translations": [...]} nếu dùng json_mode
-        # Cố gắng tìm mảng trong text
         try:
             data = json.loads(txt)
-            if isinstance(data, list):
-                return data
+            if isinstance(data, list): return data
             if isinstance(data, dict):
-                # Tìm value là list đầu tiên
                 for v in data.values():
                     if isinstance(v, list): return v
-        except:
-            pass
+        except: pass
             
         cleaned = clean_json_response(txt)
         return json.loads(cleaned)
@@ -112,41 +113,48 @@ def translate_openai(texts, glossary=None, from_lang='zh', model_name=OPENAI_MOD
         return [None] * len(texts)
 
 def translate_gemini(texts, glossary=None, from_lang='zh', model_name=DEFAULT_MODEL):
-    """Dịch một mảng các câu văn bằng Gemini API với xử lý lỗi chuyên sâu."""
+    """
+    Dịch SRT bằng Gemini với cơ chế ID-based Batching và Exponential Backoff (Tối ưu 2026).
+    """
     api_key_list = [k.strip() for k in KEYS if k.strip()]
     if not api_key_list:
         console.print("[bold red]Lỗi:[/bold red] Không tìm thấy GEMINI_API_KEY trong file .env")
         return [None] * len(texts)
 
+    # 1. Chuẩn bị dữ liệu theo ID
+    input_payload = [{"id": i, "text": t} for i, t in enumerate(texts)]
+    
     lang_from_text = "tự động nhận diện" if from_lang == 'auto' else from_lang
     system_prompt = (
-        f"Bạn là một chuyên gia dịch thuật phim chuyên nghiệp từ {lang_from_text} sang tiếng Việt. "
-        "Dịch danh sách các câu sau sang tiếng Việt tự nhiên, phù hợp văn cảnh video review/reup phim. "
-        "QUY TẮC QUAN TRỌNG:\n"
-        "1. Trả về đúng định dạng JSON List (mảng các chuỗi).\n"
-        "2. Số lượng phần tử trả về PHẢI CHÍNH XÁC bằng số lượng đầu vào.\n"
-        "3. Không giải thích, không thêm văn bản ngoài JSON."
+        f"Bạn là một Senior Translator chuyên về phim từ {lang_from_text} sang tiếng Việt. "
+        "Nhiệm vụ: Dịch phần 'text' của mỗi đối tượng trong mảng JSON đầu vào.\n"
+        "YÊU CẦU BẮT BUỘC:\n"
+        "1. Trả về đúng định dạng JSON Array of Objects: [{\"id\": ..., \"text\": \"...\"}].\n"
+        "2. Giữ nguyên 'id' của mỗi đối tượng, không được thay đổi hoặc xóa bỏ.\n"
+        "3. Dịch 'text' sang tiếng Việt tự nhiên, phù hợp văn cảnh review/lồng tiếng phim.\n"
+        "4. Chỉ trả về mảng JSON, không thêm bất kỳ văn bản giải thích nào khác."
     )
     
     if glossary:
         system_prompt += f"\nTuân thủ bảng tra thuật ngữ (Glossary): {json.dumps(glossary, ensure_ascii=False)}"
 
-    user_prompt = f"Dịch list sau (số lượng: {len(texts)} câu):\n{json.dumps(texts, ensure_ascii=False)}"
+    user_prompt = f"Dịch mảng JSON sau ({len(texts)} dòng):\n{json.dumps(input_payload, ensure_ascii=False)}"
     
-    # Tạo bản sao danh sách key để xoay vòng
     available_keys = api_key_list.copy()
+    max_retries = 10
     
-    for retry in range(10): # Tăng lên 10 lần thử
+    for retry in range(max_retries):
         if not available_keys:
-            console.print(f"[yellow]Tất cả Key đều bị giới hạn hoặc lỗi.[/yellow] Nghỉ 60s rồi thử lại các key...")
-            time.sleep(60)
+            # Nếu hết key trong vòng lặp này, đợi lâu chút rồi hồi lại toàn bộ key
+            wait_time = 2 ** retry
+            console.print(f"[yellow]Tất cả Key đang bị giới hạn hoặc lỗi. Nghỉ {wait_time}s (Exponential Backoff)...[/yellow]")
+            time.sleep(wait_time)
             available_keys = api_key_list.copy()
             continue
 
         current_key = random.choice(available_keys)
         try:
             client = genai.Client(api_key=current_key)
-            
             response = client.models.generate_content(
                 model=model_name,
                 contents=user_prompt,
@@ -156,19 +164,47 @@ def translate_gemini(texts, glossary=None, from_lang='zh', model_name=DEFAULT_MO
                 )
             )
             
+            # Giải mã kết quả
             cleaned_text = clean_json_response(response.text)
-            translated_list = json.loads(cleaned_text)
+            try:
+                translated_objects = json.loads(cleaned_text)
+            except Exception as jse:
+                console.print(f"[red]Lỗi Parse JSON đầu ra của Gemini:[/red] {jse}. Đang thử lại...")
+                available_keys.remove(current_key) if current_key in available_keys else None
+                continue
+
+            # Ánh xạ theo ID để đảm bảo khớp dữ liệu gốc
+            results = [None] * len(texts)
+            match_count = 0
+            if isinstance(translated_objects, list):
+                for obj in translated_objects:
+                    if isinstance(obj, dict) and 'id' in obj and 'text' in obj:
+                        idx = int(obj['id'])
+                        if 0 <= idx < len(texts):
+                            results[idx] = obj['text']
+                            match_count += 1
             
-            if len(translated_list) == len(texts):
-                return translated_list
+            if match_count > 0:
+                # Nếu khớp đủ số dòng
+                if match_count != len(texts):
+                    console.print(f"[yellow]Cảnh báo:[/yellow] Thiếu {len(texts) - match_count} dòng trong batch. Sẽ dùng text gốc cho các dòng thiếu.")
+                
+                # Chủ động nghỉ 2s sau mỗi lượt thành công để tránh spam
+                time.sleep(2)
+                return results
             else:
-                console.print(f"[yellow]Cảnh báo:[/yellow] Kích thước không khớp. Thử lại...")
+                console.print(f"[red]Gemini trả về mảng rỗng hoặc sai định dạng ID.[/red] Thử lại...")
+                available_keys.remove(current_key) if current_key in available_keys else None
+
         except Exception as e:
             if "429" in str(e):
-                console.print(f"[yellow]Key {current_key[:10]}... bị Rate Limit (429). Đang đổi key khác...[/yellow]")
+                wait_time = 2 ** retry
+                console.print(f"[yellow]Key {current_key[:10]}... dính Rate Limit (429). Nghỉ {wait_time}s rồi đổi key...[/yellow]")
+                time.sleep(wait_time)
                 if current_key in available_keys:
                     available_keys.remove(current_key)
                 continue
+            
             console.print(f"[red]Lỗi Gemini (Lượt {retry+1}):[/red] {e}")
             time.sleep(5)
             
