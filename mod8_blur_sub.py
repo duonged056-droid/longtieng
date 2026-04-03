@@ -46,18 +46,20 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        # delogo đã tích hợp sẵn x, y, w, h nên không cần crop + overlay phức tạp.
-    # Điều này giúp loại bỏ hoàn toàn việc dùng nhãn [vout] hay [b], tránh bị lỗi do hệ thống xóa dấu ngoặc vuông.
-    # SỬA LỖI: Bỏ 'band=1' vì bản FFmpeg mới của bạn đã loại bỏ tùy chọn này.
-    filter_val = f"delogo=x={args.x}:y={args.y}:w={args.w}:h={args.h}"
+        # Để xóa phụ đề "trùng màu nền" và "không bị nhòe/lem" (như ảnh bạn gửi):
+    # 1. delogo: Giúp lấy màu sắc trung bình của vùng xung quanh lấp vào (matching background color).
+    # 2. gblur (Gaussian Blur): Làm mịn vùng đó để tạo hiệu ứng mờ "sạch" (clean blur bar), không còn vết chữ.
+    # Ta dùng một chuỗi filter liên hoàn trong -vf (Video Filter) để không bị lỗi dấu ngoặc vuông.
+    
+    filter_val = f"delogo=x={args.x}:y={args.y}:w={args.w}:h={args.h},gblur=sigma=20:steps=2"
 
     cmd = [
         ffmpeg_cmd, "-y",
     ] + hw_accel + [
         "-i", args.video_in,
         "-vf", filter_val,
-        "-map", "0:v",     # Chỉ định rõ lấy video
-        "-map", "0:a?",    # Lấy audio nếu có
+        "-map", "0:v",
+        "-map", "0:a?",
         "-c:v", encoder,
         "-preset", preset,
         "-c:a", "copy",
