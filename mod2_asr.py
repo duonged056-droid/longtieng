@@ -4,8 +4,20 @@ import argparse
 import torch
 import gc
 import whisperx
+import warnings
 from rich.console import Console
 from transformers import Wav2Vec2Processor
+
+# Tắt các cảnh báo không cần thiết từ thư viện (torchaudio, pyannote, v.v.)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*backend.*")
+warnings.filterwarnings("ignore", message=".*ReproducibilityWarning.*")
+
+# Tối ưu hóa hiệu năng cho GPU NVIDIA (RTX 30 series trở lên)
+if torch.cuda.is_available():
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 if os.name == 'nt':
     base_dir = os.path.dirname(os.path.abspath(__file__))
