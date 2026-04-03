@@ -46,15 +46,16 @@ def main():
         console.print("[bold yellow]⚠️ Không tìm thấy GPU, sử dụng CPU.[/bold yellow]")
         encoder = "libx264"
         preset = "fast"
-        # FFmpeg boxblur có giới hạn: bán kính (radius) phải nhỏ hơn một nửa chiều rộng/cao của vùng crop.
-    # Thông thường giới hạn tuyệt đối là 40, nhưng tùy kích thước vùng mà nó có thể thấp hơn (ví dụ h=76 thì radius < 38).
-    max_allowed = min((args.w // 2) - 2, (args.h // 2) - 2, 35)
-    safe_blur = max(1, min(args.blur, max_allowed))
+        # FFmpeg boxblur có giới hạn bán kính cho từng bình diện (luma/chroma).
+    # Ta tính bán kính luma-radius (lp) cực kỳ an toàn để không bao giờ bị lỗi luma hay chroma.
+    # h//4 là con số cực kỳ an toàn cho mọi định dạng pixel (YUV420, 422, 444).
+    safe_blur = max(1, min(args.blur, (args.w // 4) - 1, (args.h // 4) - 1, 30))
 
-    # Filter phức hợp:
-    # 1. Trích xuất vùng (crop) -> Làm mờ (boxblur) -> gán nhãn [b]
-    # 2. Lấy video gốc [0:v] đè nhãn [b] lên tại tọa độ x,y -> gán nhãn [vout]
-    filter_chain = f"[0:v]crop={args.w}:{args.h}:{args.x}:{args.y},boxblur={safe_blur}:1[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
+    # Ta set riêng lẻ luma_radius (lp) và luma_power (l p r) để đạt độ mờ cao
+    # Giữ các plane khác ở mức tối thiểu để tránh lỗi vượt quá giới hạn plane
+    f_crop = f"crop={args.w}:{args.h}:{args.x}:{args.y}"
+    f_blur = f"boxblur=lp={safe_blur}:cp=1" # lp=luma_radius, cp=chroma_radius (giữ 1 để không lỗi chroma h/2)
+    filter_chain = f"[0:v]{f_crop},{f_blur}[b];[0:v][b]overlay={args.x}:{args.y}[vout]"
 
     cmd = [
         ffmpeg_cmd, "-y",
@@ -62,7 +63,7 @@ def main():
         "-i", args.video_in,
         "-filter_complex", filter_chain,
         "-map", "[vout]",
-        "-map", "0:a?",
+        "-map", "0:a?",    # Giữ audio
         "-c:v", encoder,
         "-preset", preset,
         "-c:a", "copy",
