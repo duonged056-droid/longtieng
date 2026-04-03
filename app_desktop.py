@@ -591,6 +591,14 @@ class BumYTCloneExactApp(ctk.CTk):
                 "--srt_out", srt_synced,
                 "--ffmpeg_path", ffmpeg_bin
             ]
+            
+            # Tự động phát hiện nếu đã tách BGM bằng Section 6
+            bgm_clean = os.path.join(self.out_dir, "bgm_clean.wav")
+            if os.path.exists(bgm_clean):
+                cmd_m7 += ["--bgm_in", bgm_clean]
+                # Cập nhật bgm_wav cho các bước sau
+                bgm_wav = bgm_clean
+                
             tasks.append(cmd_m7)
             
             # 3. Muxing — tự chọn file sync hoặc gốc
