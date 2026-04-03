@@ -241,7 +241,12 @@ class BumYTCloneExactApp(ctk.CTk):
         ctk.CTkLabel(grid_opts, text="File SRT nguồn:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.entry_srt_in = ctk.CTkEntry(grid_opts, width=500)
         self.entry_srt_in.grid(row=0, column=1, padx=10, pady=5)
-        ctk.CTkButton(grid_opts, text="Chọn File SRT...", width=120, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_srt_in, [("SRT", "*.srt")])).grid(row=0, column=2, padx=5)
+        
+        srt_btn_frame = ctk.CTkFrame(grid_opts, fg_color="transparent")
+        srt_btn_frame.grid(row=0, column=2, padx=5)
+        
+        ctk.CTkButton(srt_btn_frame, text="Chọn File SRT...", width=120, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_srt_in, [("SRT", "*.srt")])).pack(side="left", padx=2)
+        ctk.CTkButton(srt_btn_frame, text="🎙️ Auto Sub (Chuẩn CapCut)", width=180, fg_color="#ff2c55", text_color="white", font=ctk.CTkFont(weight="bold"), command=self.extract_smart_srt).pack(side="left", padx=2)
 
         # Tên MP3 ra
         ctk.CTkLabel(grid_opts, text="Tên file MP3 đầu ra:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
@@ -528,6 +533,65 @@ class BumYTCloneExactApp(ctk.CTk):
         else:
             self.opt_voice_id.configure(values=["Google Nữ", "Google Nam"])
             self.opt_voice_id.set("Google Nữ")
+
+    def extract_smart_srt(self):
+        v_in = self.entry_video_t3.get().strip()
+        if not v_in or not os.path.exists(v_in):
+            messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn để tạo Sub tự động!")
+            return
+            
+        def process():
+            self.log("\n>>> BẮT ĐẦU TRÍCH XUẤT SUB TỰ ĐỘNG (ASR AI)...")
+            temp_audio = os.path.join(self.out_dir, "temp_vocals.wav")
+            ffmpeg_bin = self.ffmpeg_path.get().strip()
+            
+            # Bước 1: Trích xuất Audio 16kHz mono
+            self.log("> Đang trích xuất âm thanh (FFmpeg)...")
+            cmd_ff = [
+                ffmpeg_bin, "-y", "-i", v_in,
+                "-ar", "16000", "-ac", "1", "-vn", temp_audio
+            ]
+            try:
+                subprocess.run(cmd_ff, check=True, creationflags=0x08000000 if sys.platform == "win32" else 0)
+            except Exception as e:
+                self.log(f"❌ Lỗi FFmpeg: {e}", level="warning")
+                return
+
+            # Bước 2: Chạy mod2_asr.py
+            self.log("> Đang chạy nhận dạng giọng nói (ASR)...")
+            cmd_asr = [
+                get_python(), "mod2_asr.py",
+                "--audio_in", temp_audio,
+                "--output_dir", self.out_dir,
+                "--out_name", "capcut_smart_sub",
+                "--batch_size", "4"
+            ]
+            
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+            
+            try:
+                proc = subprocess.Popen(cmd_asr, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=env, **kwargs)
+                for line in iter(proc.stdout.readline, ""):
+                    self.log(line.strip())
+                proc.wait()
+                
+                srt_out = os.path.join(self.out_dir, "capcut_smart_sub.srt")
+                if os.path.exists(srt_out):
+                    self.after(0, lambda: (self.entry_srt_in.delete(0, 'end'), self.entry_srt_in.insert(0, srt_out)))
+                    self.log(f"✅ Đã tạo Sub tự động thành công: {srt_out}", level="success")
+                else:
+                    self.log("❌ Không tìm thấy file SRT đầu ra.", level="warning")
+                    
+            except Exception as e:
+                self.log(f"❌ Lỗi ASR: {e}", level="warning")
+            finally:
+                if os.path.exists(temp_audio):
+                    try: os.remove(temp_audio)
+                    except: pass
+
+        threading.Thread(target=process, daemon=True).start()
 
     def run_tab3(self):
         custom_srt = self.entry_srt_in.get().strip()
