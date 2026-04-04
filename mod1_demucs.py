@@ -15,11 +15,27 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "submodules", "demucs"))
 try:
     from demucs.api import Separator
 except ImportError:
-    # Nếu không import được từ API, thử install nếu cần (nhưng ở đây giả định có sẵn)
     print("Cảnh báo: Không thể nạp Demucs từ submodules. Đang thử nạp từ hệ thống...")
     from demucs.api import Separator
 
 console = Console()
+
+# --- Cấu hình Tối ưu ---
+SEGMENT_DURATION_SEC = 1800  # 30 phút mỗi đoạn
+OVERLAP_SEC = 10             # 10 giây overlap để tránh artifact ở ranh giới
+LONG_VIDEO_THRESHOLD_SEC = 7200  # >2h mới dùng segment mode
+
+def get_audio_duration_sec(audio_path):
+    """Lấy duration bằng ffprobe (nhanh, không load file)."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", audio_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return float(result.stdout.strip())
+    except Exception:
+        return 0
 
 def extract_audio(video_path: str, audio_path: str):
     """Trích xuất âm thanh gốc từ video (44.1kHz Stereo)."""
@@ -34,61 +50,171 @@ def extract_audio(video_path: str, audio_path: str):
     subprocess.run(cmd, check=True)
     console.print("[green]Trích xuất hoàn tất.[/green]")
 
+def extract_audio_segment(video_path: str, audio_path: str, start_sec: float, duration_sec: float):
+    """Trích xuất một đoạn audio từ video (Fast Seek + Exact Trim)."""
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-ss", f"{start_sec:.3f}",
+        "-i", video_path,
+        "-t", f"{duration_sec:.3f}",
+        "-vn", "-acodec", "pcm_s16le",
+        "-ar", "44100", "-ac", "2",
+        audio_path
+    ]
+    subprocess.run(cmd, check=True)
+
 def save_wav(wav: np.ndarray, output_path: str, sample_rate: int = 44100):
     """Lưu mảng numpy (float32) thành file WAV (int16)."""
     wav_norm = wav * 32767
     wavfile.write(output_path, sample_rate, wav_norm.astype(np.int16))
 
-def separate_audio(audio_path: str, vocal_out: str, bgm_out: str):
-    """Sử dụng Demucs (htdemucs) tách lời và nhạc nền."""
-    
-    # Kiểm tra GPU NVIDIA (Yêu cầu 2026)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device == "cpu":
-        console.print("[bold red]CẢNH BÁO:[/bold red] Không tìm thấy GPU NVIDIA, đang chạy trên CPU (Tốc độ sẽ rất chậm).")
-    else:
-        console.print(f"[bold green]GPU Đang chạy:[/bold green] {torch.cuda.get_device_name(0)}")
-
-    console.print(f"[bold cyan]Đang khởi tạo Demucs (htdemucs)...[/bold cyan]")
-    
-    # Tối ưu: shifts=0 để đạt tốc độ tối đa cho reup
-    separator = Separator(model="htdemucs", device=device, shifts=0)
-    
-    console.print(f"[bold yellow]Đang tiến hành tách âm thanh... (Vui lòng đợi)[/bold yellow]")
+def separate_single(separator, audio_path: str, vocal_out: str, bgm_out: str):
+    """Tách 1 file audio → vocals + bgm."""
     origin, separated = separator.separate_audio_file(audio_path)
     
-    # Separated là dict chứa các track: vocals, drums, bass, other
-    # Track 1: Vocals (Giọng nói)
+    # Track 1: Vocals
     vocals = separated['vocals'].numpy().T
     save_wav(vocals, vocal_out)
     
-    # Track 2: BGM (Tổng hợp drums + bass + other)
-    # Chúng ta cộng gộp các track không phải vocals
+    # Track 2: BGM (drums + bass + other)
     instruments = None
     for k, v in separated.items():
-        if k == 'vocals': continue
+        if k == 'vocals':
+            continue
         if instruments is None:
             instruments = v
         else:
             instruments += v
-            
     bgm = instruments.numpy().T
     save_wav(bgm, bgm_out)
     
+    # Giải phóng tensor ngay
+    del origin, separated, vocals, instruments, bgm
+    gc.collect()
+
+def concat_wav_files(file_list, output_path, overlap_sec=0, sample_rate=44100):
+    """Ghép nối danh sách WAV files với crossfade ở overlap."""
+    overlap_samples = int(overlap_sec * sample_rate)
+    
+    combined = None
+    for i, fpath in enumerate(file_list):
+        sr, data = wavfile.read(fpath)
+        data = data.astype(np.float32) / 32767.0
+        
+        if combined is None:
+            combined = data
+        else:
+            if overlap_samples > 0 and i > 0:
+                # Crossfade: linear blend ở vùng overlap
+                ol = min(overlap_samples, len(combined), len(data))
+                if ol > 0:
+                    fade_out = np.linspace(1.0, 0.0, ol).reshape(-1, 1) if data.ndim > 1 else np.linspace(1.0, 0.0, ol)
+                    fade_in = np.linspace(0.0, 1.0, ol).reshape(-1, 1) if data.ndim > 1 else np.linspace(0.0, 1.0, ol)
+                    combined[-ol:] = combined[-ol:] * fade_out + data[:ol] * fade_in
+                    combined = np.concatenate([combined, data[ol:]])
+                else:
+                    combined = np.concatenate([combined, data])
+            else:
+                combined = np.concatenate([combined, data])
+        
+        # Giải phóng data segment ngay
+        del data
+    
+    if combined is not None:
+        save_wav(combined, output_path, sample_rate)
+        del combined
+    gc.collect()
+
+def separate_audio(audio_path: str, vocal_out: str, bgm_out: str, model_name: str = "htdemucs", video_path: str = None):
+    """Sử dụng Demucs để tách lời và nhạc nền - Có segment mode cho video dài."""
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
+        console.print("[bold red]CẢNH BÁO:[/bold red] Không tìm thấy GPU NVIDIA, đang chạy trên CPU.")
+    else:
+        console.print(f"[bold green]GPU Đang chạy:[/bold green] {torch.cuda.get_device_name(0)}")
+        # Hiển thị VRAM
+        vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024**2)
+        console.print(f"[dim]VRAM: {vram_mb:.0f} MB[/dim]")
+
+    console.print(f"[bold cyan]Đang khởi tạo Demucs ({model_name})...[/bold cyan]")
+    separator = Separator(model=model_name, device=device, shifts=0)
+    
+    # Kiểm tra duration để quyết định mode
+    audio_dur = get_audio_duration_sec(audio_path)
+    
+    if audio_dur > LONG_VIDEO_THRESHOLD_SEC:
+        # ========== SEGMENT MODE (Video >2h) ==========
+        console.print(f"[bold yellow]📐 VIDEO DÀI ({audio_dur/3600:.1f}h) — Chuyển sang SEGMENT MODE (mỗi đoạn {SEGMENT_DURATION_SEC//60} phút)[/bold yellow]")
+        
+        temp_dir = os.path.dirname(vocal_out)
+        vocal_parts = []
+        bgm_parts = []
+        
+        seg_idx = 0
+        current_sec = 0
+        
+        while current_sec < audio_dur:
+            seg_start = max(0, current_sec - OVERLAP_SEC) if seg_idx > 0 else 0
+            seg_dur = SEGMENT_DURATION_SEC + (OVERLAP_SEC if seg_idx > 0 else 0)
+            seg_dur = min(seg_dur, audio_dur - seg_start)
+            
+            seg_audio = os.path.join(temp_dir, f"_seg_audio_{seg_idx}.wav")
+            seg_vocal = os.path.join(temp_dir, f"_seg_vocal_{seg_idx}.wav")
+            seg_bgm = os.path.join(temp_dir, f"_seg_bgm_{seg_idx}.wav")
+            
+            console.print(f"  [cyan]▶ Đoạn {seg_idx+1}: {seg_start/60:.1f}m → {(seg_start+seg_dur)/60:.1f}m[/cyan]")
+            
+            # Extract segment audio
+            source = video_path if video_path else audio_path
+            extract_audio_segment(source, seg_audio, seg_start, seg_dur)
+            
+            # Tách
+            separate_single(separator, seg_audio, seg_vocal, seg_bgm)
+            
+            vocal_parts.append(seg_vocal)
+            bgm_parts.append(seg_bgm)
+            
+            # Xóa segment audio tạm ngay
+            if os.path.exists(seg_audio):
+                os.remove(seg_audio)
+            
+            # Force GPU cleanup sau mỗi segment
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            seg_idx += 1
+            current_sec += SEGMENT_DURATION_SEC
+        
+        # Ghép nối kết quả
+        console.print("[cyan]Đang ghép nối kết quả...[/cyan]")
+        concat_wav_files(vocal_parts, vocal_out, overlap_sec=OVERLAP_SEC if len(vocal_parts) > 1 else 0)
+        concat_wav_files(bgm_parts, bgm_out, overlap_sec=OVERLAP_SEC if len(bgm_parts) > 1 else 0)
+        
+        # Cleanup segment files
+        for f in vocal_parts + bgm_parts:
+            if os.path.exists(f):
+                os.remove(f)
+    else:
+        # ========== NORMAL MODE (Video <=2h) ==========
+        console.print(f"[bold yellow]Đang tiến hành tách âm thanh... (Vui lòng đợi)[/bold yellow]")
+        separate_single(separator, audio_path, vocal_out, bgm_out)
+
     console.print(f"[bold green]TÁCH ÂM THÀNH CÔNG![/bold green]")
     console.print(f"- Vocal: {vocal_out}")
     console.print(f"- BGM: {bgm_out}")
 
-    # Giải phóng VRAM ngay lập tức (Yêu cầu 2026)
-    del separator, origin, separated
+    # Giải phóng VRAM
+    del separator
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 def main():
-    parser = argparse.ArgumentParser(description="Module 1: Tách âm thanh Vocals & BGM (LongTieng 2026 Edition)")
+    parser = argparse.ArgumentParser(description="Module 1: Tách âm thanh Vocals & BGM (Tối ưu RAM/VRAM)")
     parser.add_argument("--video_in", required=True, help="Video đầu vào")
     parser.add_argument("--output_dir", required=True, help="Thư mục đầu ra")
+    parser.add_argument("--model", default="htdemucs", help="Model Demucs (htdemucs, htdemucs_ft, mdx_extra)")
     
     args = parser.parse_args()
     
@@ -100,8 +226,8 @@ def main():
     try:
         # Bước 1: Trích xuất audio
         extract_audio(args.video_in, temp_audio)
-        # Bước 2: Tách âm
-        separate_audio(temp_audio, vocal_out, bgm_out)
+        # Bước 2: Tách âm (tự động chọn mode theo duration)
+        separate_audio(temp_audio, vocal_out, bgm_out, args.model, video_path=args.video_in)
     except Exception as e:
         console.print(f"[bold red]Lỗi Module 1:[/bold red] {str(e)}")
     finally:

@@ -42,15 +42,13 @@ console = Console()
 import cv2
 import numpy as np
 
-# Bỏ chế độ OpenCV Visual Timeline theo yêu cầu để dùng cơ chế AI Smart Subtitle như CapCut
-
 def format_srt_time(seconds: float) -> str:
     """Định dạng giây sang SRT time (00:00:00,000)."""
     hrs = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     msecs = int(round((seconds % 1) * 1000))
-    if msecs == 1000: # Xử lý làm tròn lên
+    if msecs == 1000:
         secs += 1
         msecs = 0
     return f"{hrs:02}:{mins:02}:{secs:02},{msecs:03}"
@@ -60,46 +58,58 @@ def filter_roi(frame, roi):
     return frame[y:y+h, x:x+w]
 
 def extract_visual_blocks(video_in, roi, sim_thresh=0.85, fps_target=10.0, min_dur=0.05):
-    """Sử dụng OpenCV để quét video theo ROI và tìm ra các khoảng thời gian chữ phụ đề hiển thị/thay đổi."""
-    import cv2
-    import numpy as np
-    
+    """Quét video theo ROI - TỐI ƯU: đọc tuần tự thay vì random seek, downsample ROI."""
     cap = cv2.VideoCapture(video_in)
     orig_fps = cap.get(cv2.CAP_PROP_FPS)
     if not orig_fps or orig_fps <= 0:
         orig_fps = 25.0
         
     frame_skip = int(max(1, round(orig_fps / fps_target)))
-    real_fps = orig_fps / frame_skip
+    
+    # TỐI ƯU: Đọc kích thước ROI target để downsample
+    roi_x, roi_y, roi_w, roi_h = map(int, roi.split(":"))
+    # Downsample ROI về max 200px width để tính MSE nhanh hơn
+    ds_scale = min(1.0, 200.0 / max(roi_w, 1))
+    ds_w = max(1, int(roi_w * ds_scale))
+    ds_h = max(1, int(roi_h * ds_scale))
     
     blocks = []
     prev_roi_gray = None
     prev_change_time = 0.0
     
     frame_idx = 0
-    while True:
-        ret, frame = cap.read()
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # TỐI ƯU: Đọc tuần tự + skip frames bằng grab() thay vì cap.set() random seek
+    # Random seek trên SSD vẫn chậm hơn sequential read + skip
+    while frame_idx < total_frames:
+        ret = cap.grab()
         if not ret:
             break
             
         if frame_idx % frame_skip == 0:
+            ret, frame = cap.retrieve()
+            if not ret:
+                frame_idx += 1
+                continue
+                
             current_time = frame_idx / orig_fps
-            roi_img = filter_roi(frame, roi)
-            roi_gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
+            roi_img = frame[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w]
             
-            # Khử nhiễu để tính toán độ tương đồng mượt hơn
+            # TỐI ƯU: Downsample trước khi grayscale + blur → ít pixel hơn = nhanh hơn
+            if ds_scale < 1.0:
+                roi_img = cv2.resize(roi_img, (ds_w, ds_h), interpolation=cv2.INTER_AREA)
+            
+            roi_gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
             roi_gray = cv2.GaussianBlur(roi_gray, (3, 3), 0)
             
             if prev_roi_gray is not None:
-                # Tính MSE và độ sai lệch
+                # Tính MSE
                 err = np.sum((prev_roi_gray.astype("float") - roi_gray.astype("float")) ** 2)
                 err /= float(prev_roi_gray.shape[0] * prev_roi_gray.shape[1])
-                
-                # Biến đổi err thành sim
                 sim = 1.0 - min(err / 255.0, 1.0) 
                 
-                if sim < sim_thresh: # Có sự kiện biến đổi frame (đổi chữ)
-                    # Kết thúc block cũ
+                if sim < sim_thresh:
                     dur = current_time - prev_change_time
                     if dur >= min_dur:
                         blocks.append({'start': prev_change_time, 'end': current_time})
@@ -113,17 +123,14 @@ def extract_visual_blocks(video_in, roi, sim_thresh=0.85, fps_target=10.0, min_d
         
     cap.release()
     
-    if (frame_idx / orig_fps) - prev_change_time >= min_dur:
+    if frame_idx > 0 and (frame_idx / orig_fps) - prev_change_time >= min_dur:
         blocks.append({'start': prev_change_time, 'end': frame_idx / orig_fps})
         
     return blocks
 
 def align_words_to_blocks(words, blocks):
-    """Nhét các từ vào trong các block visual timeline một cách chính xác."""
+    """Nhét các từ vào trong các block visual timeline."""
     new_segments = []
-    
-    # words là tuple array: [{'word':'abc', 'start':0.1, 'end':0.5}, ...]
-    # blocks: [{'start': 0.1, 'end': 3.5}, ...]
     
     block_idx = 0
     current_text = ""
@@ -135,7 +142,6 @@ def align_words_to_blocks(words, blocks):
             
         w_mid = (w['start'] + w['end']) / 2.0
         
-        # Tiến block_idx lên nếu thời điểm giữa của từ nằm sau block hiện tại
         while block_idx < len(blocks) - 1 and w_mid > blocks[block_idx]['end']:
             if current_words:
                 new_segments.append({
@@ -148,7 +154,6 @@ def align_words_to_blocks(words, blocks):
                 current_text = ""
             block_idx += 1
             
-        # Thêm từ vào block
         current_words.append(w)
         current_text += w.get('word', '')
         
@@ -163,17 +168,12 @@ def align_words_to_blocks(words, blocks):
     return new_segments
 
 def split_segments(segments, max_chars=18, max_gap=0.5, video_in=None, roi=None, sim=0.85, fps=10.0):
-    """
-    Chia câu thông minh như thuật toán Smart Subtitle của CapCut.
-    Hỗ trợ chia bằng Visual OCR Bounding Box nếu được cung cấp, ngược lại dùng thuật toán Audio Pause thông minh.
-    """
-    # Nếu có Video và ROI, sử dụng thuật toán Visual Alignment ưu tiên tối đa
+    """Chia câu thông minh như thuật toán Smart Subtitle của CapCut."""
     if video_in and roi and str(video_in).lower() != "none" and str(roi).lower() != "none":
         console.print("[bold cyan]Đang chạy quét Visual OCR Timeline để khớp phụ đề 100% với video...[/bold cyan]")
         
         blocks = extract_visual_blocks(video_in, roi, sim_thresh=sim, fps_target=fps)
         
-        # Gộp toàn bộ words lại
         all_words = []
         for seg in segments:
             if 'words' in seg:
@@ -183,18 +183,15 @@ def split_segments(segments, max_chars=18, max_gap=0.5, video_in=None, roi=None,
             aligned = align_words_to_blocks(all_words, blocks)
             if aligned:
                 console.print(f"[bold green]Visual Scan thành công: Tạo ra {len(aligned)} câu![/bold green]")
-                segments = aligned # Cho phép kết quả ROI đi tiếp vào bộ lọc gộp NLP phía dưới
+                segments = aligned
 
-    # THUẬT TOÁN AUDIO SMART NLP (Mô phỏng 99% CapCut chuyên nghiệp)
-    # Bước 1: Gộp toàn bộ từ từ tất cả các segments (Flattening)
+    # THUẬT TOÁN AUDIO SMART NLP
     all_units = []
     for seg in segments:
-        # Ưu tiên lấy words chi tiết (nếu có)
         if 'words' in seg and seg['words']:
             for w in seg['words']:
                 if w.get('word', '').strip():
                     all_units.append(w)
-        # Nếu không có words, lấy cả segment làm 1 unit
         elif seg.get('text', '').strip():
             all_units.append({
                 'word': seg['text'].strip(),
@@ -205,12 +202,10 @@ def split_segments(segments, max_chars=18, max_gap=0.5, video_in=None, roi=None,
     if not all_units:
         return segments
 
-    # Bước 2: Duyệt qua từng từ/đoạn và gộp thành câu dựa trên ngữ pháp và khoảng lặng
     new_segments = []
     current_words = []
     current_text = ""
     
-    # Danh sách các trợ từ và dấu câu để ngắt câu tự nhiên
     sentence_ends = ['。', '！', '？', '；', '!', '?', ';', '…']
     particles = ['了', '啊', '吗', '呢', '吧', '的', '呐', '呀']
 
@@ -219,7 +214,6 @@ def split_segments(segments, max_chars=18, max_gap=0.5, video_in=None, roi=None,
         current_words.append(w)
         current_text += word_text
         
-        # Tính toán khoảng nghỉ (gap) với unit tiếp theo
         is_last = (i == len(all_units) - 1)
         next_gap = 0
         if not is_last:
@@ -227,43 +221,29 @@ def split_segments(segments, max_chars=18, max_gap=0.5, video_in=None, roi=None,
             if 'start' in next_unit and 'end' in w:
                 next_gap = max(0, next_unit['start'] - w['end'])
 
-        # ĐIỀU KIỆN NGẮT CÂU (CAPCUT STYLE):
         should_split = False
         
-        # 1. Gặp dấu kết thúc câu mạnh (luôn ngắt)
         if any(p in word_text for p in sentence_ends):
             should_split = True
-            
-        # 2. Xử lý khoảng lặng (Gap)
-        elif next_gap > 1.0: # Hard Pause (luôn ngắt)
+        elif next_gap > 1.0:
             should_split = True
-        elif next_gap > max_gap: # Normal Pause (ngắt nếu câu đã có độ dài tương đối)
+        elif next_gap > max_gap:
             if len(current_text) >= 10:
                 should_split = True
-            # Nếu câu quá ngắn (<10), bỏ qua gap này để gộp tiếp cho đến khi đủ dài
-            
-        # 3. Phân tách theo trợ từ và độ dài
-        elif len(current_text) >= 15: # Đủ độ dài để ngắt tự nhiên
+        elif len(current_text) >= 15:
             if any(p in word_text for p in particles + [',', '，']):
-                # Ngắt nếu gặp dấu phẩy hoặc trợ từ khi câu đã đủ dài
-                if next_gap > 0.1: # Chỉ ngắt nếu có một khoảng lặng tối thiểu
+                if next_gap > 0.1:
                     should_split = True
-                
-        # 4. Ngắt cứng nếu câu QUÁ dài (>= 22 ký tự) để đảm bảo thẩm mỹ
         elif len(current_text) >= 22:
             should_split = True
 
-        # GỘP TUYỆT ĐỐI: Nếu gap cực nhỏ (< 0.1s), không bao giờ ngắt (kể cả gặp hạt từ)
         if next_gap < 0.1 and not any(p in word_text for p in sentence_ends) and not is_last:
             should_split = False
 
-        # Thực thi ngắt câu
         if should_split or is_last:
-            # Đảm bảo sub không bị biến mất quá nhanh
             start_time = current_words[0]['start']
             end_time = current_words[-1]['end']
             
-            # Xử lý khoảng hiển thị tối thiểu 0.8s cho sub
             if is_last and end_time - start_time < 0.8:
                 end_time = start_time + 0.8
 
@@ -279,7 +259,7 @@ def split_segments(segments, max_chars=18, max_gap=0.5, video_in=None, roi=None,
     return new_segments
 
 def save_as_srt(segments, srt_path, video_in=None, roi=None, sim=0.85, fps=10.0):
-    """Lưu kết quả transcription thành file SRT tránh bị gộp dòng."""
+    """Lưu kết quả transcription thành file SRT."""
     segments = split_segments(segments, max_chars=18, max_gap=0.5, video_in=video_in, roi=roi, sim=sim, fps=fps)
     
     console.print(f"[bold blue]Đang ghi file SRT:[/bold blue] {srt_path}")
@@ -290,20 +270,42 @@ def save_as_srt(segments, srt_path, video_in=None, roi=None, sim=0.85, fps=10.0)
             text = seg['text'].strip()
             f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
 
-def run_asr(audio_in: str, srt_out: str, batch_size: int = 4, mode="normal", video_in=None, roi=None, sim=0.85, fps=10.0):
-    """Quy trình nhận dạng: Whisper -> Alignment -> Export."""
+def get_optimal_batch_size():
+    """Tự động chọn batch_size dựa trên VRAM."""
+    if not torch.cuda.is_available():
+        return 2
+    vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024**2)
+    if vram_mb < 4096:    # <4GB VRAM
+        return 1
+    elif vram_mb < 6144:  # <6GB VRAM
+        return 2
+    elif vram_mb < 8192:  # <8GB VRAM
+        return 4
+    else:
+        return 8
+
+def run_asr(audio_in: str, srt_out: str, batch_size: int = 4, mode="normal", video_in=None, roi=None, sim=0.85, fps=2.0):
+    """Quy trình nhận dạng: Whisper -> Alignment -> Export.
+    TỐI ƯU: Auto batch_size, synchronize trước empty_cache, tuần tự model load."""
             
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cpu":
-        console.print("[bold red]LỖI:[/bold red] Module ASR yêu cầu GPU NVIDIA để chạy WhisperX mượt mà.")
+        console.print("[bold red]LỖI:[/bold red] Module ASR yêu cầu GPU NVIDIA.")
     else:
-        console.print(f"[bold green]GPU Đang chạy:[/bold green] {torch.cuda.get_device_name(0)}")
+        vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024**2)
+        console.print(f"[bold green]GPU:[/bold green] {torch.cuda.get_device_name(0)} ({vram_mb:.0f} MB VRAM)")
+
+    # TỐI ƯU: Auto-detect VRAM và giảm batch_size
+    optimal_bs = get_optimal_batch_size()
+    if batch_size > optimal_bs:
+        console.print(f"[yellow]⚡ Auto-tune batch_size: {batch_size} → {optimal_bs} (phù hợp VRAM)[/yellow]")
+        batch_size = optimal_bs
 
     download_root = 'models/ASR/whisper'
     os.makedirs(download_root, exist_ok=True)
 
     # Bước 1: Load WhisperX Model
-    console.print(f"[bold cyan]Đang nạp mô hình WhisperX (large-v3)...[/bold cyan]")
+    console.print(f"[bold cyan]Đang nạp mô hình WhisperX (large-v3) [batch={batch_size}]...[/bold cyan]")
     compute_type = "int8_float16" if device == "cuda" else "int8"
     
     try:
@@ -312,12 +314,14 @@ def run_asr(audio_in: str, srt_out: str, batch_size: int = 4, mode="normal", vid
         console.print(f"[bold yellow]Đang tiến hành nhận dạng tiếng Trung (zh)...[/bold yellow]")
         result = model.transcribe(audio_in, batch_size=batch_size, language='zh')
         
+        # TỐI ƯU: Đảm bảo GPU xong hoàn toàn trước khi free
         del model
         gc.collect()
         if torch.cuda.is_available():
+            torch.cuda.synchronize()  # Chờ GPU xong tất cả operations
             torch.cuda.empty_cache()
             
-        # Bước 2: Alignment (Làm khớp thời gian millisecond)
+        # Bước 2: Alignment
         console.print(f"[bold cyan]Đang khớp thời gian (Alignment)...[/bold cyan]")
         model_a, metadata = whisperx.load_align_model(language_code="zh", device=device, model_dir=download_root)
         
@@ -336,6 +340,7 @@ def run_asr(audio_in: str, srt_out: str, batch_size: int = 4, mode="normal", vid
         del model_a, metadata, result, aligned_result
         gc.collect()
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
     except Exception as e:
@@ -343,16 +348,16 @@ def run_asr(audio_in: str, srt_out: str, batch_size: int = 4, mode="normal", vid
         raise
 
 def main():
-    parser = argparse.ArgumentParser(description="Module 2: Nhận dạng giọng nói Trung Quốc (LongTieng 2026 Edition)")
+    parser = argparse.ArgumentParser(description="Module 2: Nhận dạng giọng nói Trung Quốc (Tối ưu VRAM)")
     parser.add_argument("--audio_in", required=True, help="File vocal sạch")
     parser.add_argument("--output_dir", required=True, help="Thư mục xuất SRT")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size Whisper")
-    parser.add_argument("--out_name", type=str, default="zh_output", help="Tên file đầu ra (không có đuôi .srt)")
-    parser.add_argument("--mode", type=str, default="normal", help="Chế độ xử lý (normal, review)")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size Whisper (auto-tuned)")
+    parser.add_argument("--out_name", type=str, default="zh_output", help="Tên file đầu ra")
+    parser.add_argument("--mode", type=str, default="normal", help="Chế độ xử lý")
     parser.add_argument("--video_in", type=str, help="Video đầu vào (dùng cho Phim Review)")
     parser.add_argument("--roi", type=str, help="Tọa độ ROI: x:y:w:h")
-    parser.add_argument("--sim_thresh", type=float, default=0.85, help="SSIM/MSE similarity threshold")
-    parser.add_argument("--fps", type=float, default=10.0, help="Video FPS target for ROI reading")
+    parser.add_argument("--sim_thresh", type=float, default=0.85, help="Similarity threshold")
+    parser.add_argument("--fps", type=float, default=2.0, help="Video FPS target for ROI")
     parser.add_argument("--min_dur", type=float, default=0.05, help="Min duration for block")
     
     args = parser.parse_args()

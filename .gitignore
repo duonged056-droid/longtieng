@@ -171,5 +171,6 @@ CapCut_Draft_*/
 *.zip
 *.7z
 outputs/
+output/
 capcap/
 capcut/
