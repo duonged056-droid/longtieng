@@ -77,10 +77,10 @@ def tiktok_tts(text, voice, output_path):
         return False, str(e)
 
 # --- Edge TTS Implementation ---
-async def edge_tts_gen(text, voice_config, output_path):
+async def edge_tts_gen(text, voice, output_path):
     try:
         # Tách chuỗi config để lấy ID giọng, Tốc độ, và Độ trầm
-        parts = voice_config.split('|')
+        parts = voice.split('|')
         voice_id = parts[0]
         rate = parts[1] if len(parts) > 1 else "+0%"
         pitch = parts[2] if len(parts) > 2 else "+0Hz"
@@ -165,7 +165,7 @@ def align_audio(ffmpeg_cmd, ffprobe_cmd, input_audio, duration_target, output_wa
     ratio = current_dur / max(0.1, duration_target)
     
     # Clip speed ratio
-    if ratio < 1.0: ratio = 1.0  # TỐI ƯU CHỐNG MÉO TIẾNG: Không kéo giãn âm thanh nếu AI đọc cuốn và nhanh hơn video gốc
+    if ratio < 1.0: ratio = 1.0  # TỐI ƯU CHỐNG MÉO TIẾNG: Không được kéo giãn làm chậm giọng AI
     if ratio > max_speed_ratio: ratio = max_speed_ratio
     
     # Standardize: 24kHz, 1ch, mono

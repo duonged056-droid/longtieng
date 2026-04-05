@@ -18,7 +18,8 @@ except ImportError:
     print("Cảnh báo: Không thể nạp Demucs từ submodules. Đang thử nạp từ hệ thống...")
     from demucs.api import Separator
 
-console = Console()
+# Ép thư viện không dùng ký tự điều khiển động để chống tắc ống dẫn UI
+console = Console(force_terminal=False, force_interactive=False)
 
 # --- Cấu hình Tối ưu ---
 SEGMENT_DURATION_SEC = 1800  # 30 phút mỗi đoạn
