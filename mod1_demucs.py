@@ -178,51 +178,43 @@ def separate_audio(audio_path: str, vocal_out: str, bgm_out: str, model_name: st
         current_sec = 0
         total_segments = int(np.ceil(audio_dur / SEGMENT_DURATION_SEC))
 
-        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeRemainingColumn
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(bar_width=None),
-            MofNCompleteColumn(),
-            TimeRemainingColumn(),
-            console=console
-        ) as progress:
-            main_task = progress.add_task("Đang tách âm thanh đa tầng...", total=total_segments)
+        console.print(f"[bold blue]Đang tách âm thanh đa tầng ({total_segments} đoạn)...[/bold blue]")
+        
+        while current_sec < audio_dur:
+            seg_start = max(0, current_sec - OVERLAP_SEC) if seg_idx > 0 else 0
+            seg_dur = SEGMENT_DURATION_SEC + (OVERLAP_SEC if seg_idx > 0 else 0)
+            seg_dur = min(seg_dur, audio_dur - seg_start)
             
-            while current_sec < audio_dur:
-                seg_start = max(0, current_sec - OVERLAP_SEC) if seg_idx > 0 else 0
-                seg_dur = SEGMENT_DURATION_SEC + (OVERLAP_SEC if seg_idx > 0 else 0)
-                seg_dur = min(seg_dur, audio_dur - seg_start)
-                
-                seg_audio = os.path.join(temp_dir, f"_seg_audio_{seg_idx}.wav")
-                seg_vocal = os.path.join(temp_dir, f"_seg_vocal_{seg_idx}.wav")
-                seg_bgm = os.path.join(temp_dir, f"_seg_bgm_{seg_idx}.wav")
-                
-                progress.update(main_task, description=f"Đang xử lý Đoạn {seg_idx+1}/{total_segments}...")
-                
-                # Extract segment audio
-                source = video_path if video_path else audio_path
-                extract_audio_segment(source, seg_audio, seg_start, seg_dur)
-                
-                # Tách
-                separate_single(separator, seg_audio, seg_vocal, seg_bgm)
-                
-                vocal_parts.append(seg_vocal)
-                bgm_parts.append(seg_bgm)
-                
-                # Xóa segment audio tạm ngay
-                if os.path.exists(seg_audio):
-                    os.remove(seg_audio)
-                
-                # TỐI ƯU CỰC ĐỘ: Force GPU cleanup triệt để
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                gc.collect()
-                
-                progress.advance(main_task)
-                seg_idx += 1
-                current_sec += SEGMENT_DURATION_SEC
+            seg_audio = os.path.join(temp_dir, f"_seg_audio_{seg_idx}.wav")
+            seg_vocal = os.path.join(temp_dir, f"_seg_vocal_{seg_idx}.wav")
+            seg_bgm = os.path.join(temp_dir, f"_seg_bgm_{seg_idx}.wav")
+            
+            # IN RA LOG RÕ RÀNG ĐỂ UI NHẬN ĐƯỢC NGAY LẬP TỨC
+            console.print(f"▶ Đang xử lý Đoạn {seg_idx+1}/{total_segments} (GPU đang cày, vui lòng đợi 4-6 phút/đoạn)...")
+            
+            # Extract segment audio
+            source = video_path if video_path else audio_path
+            extract_audio_segment(source, seg_audio, seg_start, seg_dur)
+            
+            # Tách
+            separate_single(separator, seg_audio, seg_vocal, seg_bgm)
+            
+            vocal_parts.append(seg_vocal)
+            bgm_parts.append(seg_bgm)
+            
+            # Xóa segment audio tạm ngay
+            if os.path.exists(seg_audio):
+                os.remove(seg_audio)
+            
+            # TỐI ƯU CỰC ĐỘ: Force GPU cleanup triệt để
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            gc.collect()
+            
+            console.print(f"✅ Xong Đoạn {seg_idx+1}/{total_segments}!")
+            seg_idx += 1
+            current_sec += SEGMENT_DURATION_SEC
         
         # Ghép nối kết quả
         console.print("[bold cyan]🔄 Đang hợp nhất các lát cắt (Merging segments)...[/bold cyan]")

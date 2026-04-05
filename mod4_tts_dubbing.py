@@ -21,7 +21,6 @@ import pysrt
 import requests
 import edge_tts
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeRemainingColumn
 
 # Ép thư viện không dùng ký tự điều khiển động để chống tắc ống dẫn UI
 console = Console(force_terminal=False, force_interactive=False)
@@ -91,7 +90,7 @@ async def edge_tts_gen(text, voice, output_path):
     except Exception:
         return False
 
-async def edge_tts_batch(tasks_list, progress=None, task_id=None):
+async def edge_tts_batch(tasks_list):
     """Chạy nhiều Edge TTS đồng thời (Chia Chunk để chống sập Loop và khóa IP)."""
     sem = asyncio.Semaphore(10) # Tối đa 10 luồng gọi lên server cùng lúc
     results = []
@@ -103,15 +102,11 @@ async def edge_tts_batch(tasks_list, progress=None, task_id=None):
                 try:
                     success = await edge_tts_gen(text, voice, output_path)
                     if success:
-                        if progress and task_id is not None:
-                            progress.advance(task_id)
                         return True
                 except Exception:
                     await asyncio.sleep(2) # Nghỉ 2s trước khi thử lại
 
         # Chấp nhận bỏ qua nếu hỏng cả 3 lần để không bị treo vĩnh viễn
-        if progress and task_id is not None:
-            progress.advance(task_id)
         return False
 
     # BÍ QUYẾT XỬ LÝ SIÊU VIDEO: Cắt thành từng cụm 50 câu
@@ -234,83 +229,78 @@ def main():
         })
 
     # --- PHASE 1: GENERATE RAW AUDIO ---
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeRemainingColumn(),
-        console=console
-    ) as progress:
-        main_task_id = progress.add_task("Dang tao giong doc (TTS)...", total=len(subs))
-        
-        tiktok_queue = [t for t in all_tasks if t["engine"] == "tiktok"]
-        edge_queue = [t for t in all_tasks if t["engine"] != "tiktok"]
-        fallback_tasks = []
-        gen_results = {}
+    console.print(f"[bold blue]PHASE 1: Đang tạo giọng đọc (TTS)... ({len(subs)} câu)[/bold blue]")
+    
+    tiktok_queue = [t for t in all_tasks if t["engine"] == "tiktok"]
+    edge_queue = [t for t in all_tasks if t["engine"] != "tiktok"]
+    fallback_tasks = []
+    gen_results = {}
 
-        if tiktok_queue:
-            with ThreadPoolExecutor(max_workers=MAX_TTS_WORKERS) as pool:
-                futures = {pool.submit(tiktok_tts, t["content"], t["voice"], t["raw_path"]): t for t in tiktok_queue}
-                for f in as_completed(futures):
-                    t = futures[f]
-                    success, err = f.result()
-                    if success:
-                        gen_results[t["idx"]] = True
-                        progress.advance(main_task_id)
-                    else:
-                        fallback_voice = "vi-VN-NamMinhNeural|+0%|+0Hz" if t["voice"] == "vi_vn_001" else "vi-VN-HoaiMyNeural|+0%|+0Hz"
-                        fallback_tasks.append((t["content"], fallback_voice, t["raw_path"], t["idx"]))
-
-        # Edge & Fallback Generation (Batch)
-        edge_batch_inputs = [(t["content"], t["voice"], t["raw_path"]) for t in edge_queue]
-        edge_batch_inputs += [(c, v, p) for c, v, p, _ in fallback_tasks]
-        
-        if edge_batch_inputs:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            res = loop.run_until_complete(edge_tts_batch(edge_batch_inputs, progress, main_task_id))
-            
-            for t, ok in zip(edge_queue, res[:len(edge_queue)]):
-                gen_results[t["idx"]] = ok
-            for (_, _, _, idx), ok in zip(fallback_tasks, res[len(edge_queue):]):
-                gen_results[idx] = ok
-
-        # --- PHASE 2: ALIGN AUDIO ---
-        align_task_id = progress.add_task("Dang khop nhip video (Align)...", total=len(subs))
-        align_results = []
-
-        with ThreadPoolExecutor(max_workers=MAX_ALIGN_WORKERS) as pool:
-            futures = []
-            for t in all_tasks:
-                if gen_results.get(t["idx"]) and os.path.exists(t["raw_path"]) and os.path.getsize(t["raw_path"]) > 100:
-                    target_sec = max(0.1, (t["sub"].end.ordinal - t["sub"].start.ordinal) / 1000.0 / speed_rate)
-                    # TỐI ƯU: cleanup_raw=True → xóa raw_*.mp3 ngay sau align
-                    futures.append(pool.submit(
-                        align_audio, ffmpeg_cmd, ffprobe_cmd, 
-                        t["raw_path"], target_sec, t["aligned_path"], 
-                        max_speed_ratio, cleanup_raw=True
-                    ))
+    if tiktok_queue:
+        console.print(f"▶ Đang gọi TikTok TTS cho {len(tiktok_queue)} câu...")
+        with ThreadPoolExecutor(max_workers=MAX_TTS_WORKERS) as pool:
+            futures = {pool.submit(tiktok_tts, t["content"], t["voice"], t["raw_path"]): t for t in tiktok_queue}
+            for i, f in enumerate(as_completed(futures), 1):
+                t = futures[f]
+                success, err = f.result()
+                if success:
+                    gen_results[t["idx"]] = True
                 else:
-                    futures.append(None)
+                    fallback_voice = "vi-VN-NamMinhNeural|+0%|+0Hz" if t["voice"] == "vi_vn_001" else "vi-VN-HoaiMyNeural|+0%|+0Hz"
+                    fallback_tasks.append((t["content"], fallback_voice, t["raw_path"], t["idx"]))
+                
+                if i % 20 == 0 or i == len(tiktok_queue):
+                    console.print(f" [dim]TikTok Progress: {i}/{len(tiktok_queue)}[/dim]")
 
-            for i, f in enumerate(futures):
-                sub = subs[i]
-                if f:
-                    try:
-                        aligned_wav = f.result()
-                        # TỐI ƯU: Dùng pydub đo duration thay vì ffprobe subprocess
-                        actual_dur = get_audio_duration_fast(aligned_wav)
-                        align_results.append((i, sub.start.ordinal, aligned_wav, int(actual_dur * 1000)))
-                    except Exception:
-                        align_results.append((i, sub.start.ordinal, None, sub.end.ordinal - sub.start.ordinal))
-                else:
+    # Edge & Fallback Generation (Batch)
+    edge_batch_inputs = [(t["content"], t["voice"], t["raw_path"]) for t in edge_queue]
+    edge_batch_inputs += [(c, v, p) for c, v, p, _ in fallback_tasks]
+    
+    if edge_batch_inputs:
+        console.print(f"▶ Đang gọi Edge TTS cho {len(edge_batch_inputs)} câu...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        res = loop.run_until_complete(edge_tts_batch(edge_batch_inputs))
+        
+        for t, ok in zip(edge_queue, res[:len(edge_queue)]):
+            gen_results[t["idx"]] = ok
+        for (_, _, _, idx), ok in zip(fallback_tasks, res[len(edge_queue):]):
+            gen_results[idx] = ok
+        console.print(f" [dim]Edge TTS Progress: Hoàn tất {len(edge_batch_inputs)} câu.[/dim]")
+
+    # --- PHASE 2: ALIGN AUDIO ---
+    console.print(f"[bold blue]PHASE 2: Đang khớp nhịp video (Align)...[/bold blue]")
+    align_results = []
+
+    with ThreadPoolExecutor(max_workers=MAX_ALIGN_WORKERS) as pool:
+        futures = []
+        for t in all_tasks:
+            if gen_results.get(t["idx"]) and os.path.exists(t["raw_path"]) and os.path.getsize(t["raw_path"]) > 100:
+                target_sec = max(0.1, (t["sub"].end.ordinal - t["sub"].start.ordinal) / 1000.0 / speed_rate)
+                # TỐI ƯU: cleanup_raw=True → xóa raw_*.mp3 ngay sau align
+                futures.append(pool.submit(
+                    align_audio, ffmpeg_cmd, ffprobe_cmd, 
+                    t["raw_path"], target_sec, t["aligned_path"], 
+                    max_speed_ratio, cleanup_raw=True
+                ))
+            else:
+                futures.append(None)
+
+        for i, f in enumerate(futures):
+            sub = subs[i]
+            if f:
+                try:
+                    aligned_wav = f.result()
+                    # TỐI ƯU: Dùng pydub đo duration thay vì ffprobe subprocess
+                    actual_dur = get_audio_duration_fast(aligned_wav)
+                    align_results.append((i, sub.start.ordinal, aligned_wav, int(actual_dur * 1000)))
+                except Exception:
                     align_results.append((i, sub.start.ordinal, None, sub.end.ordinal - sub.start.ordinal))
-                
-                if i % 50 == 0 or i == len(subs) - 1:
-                    console.print(f"[PROGRESS] Aligned {i+1}/{len(subs)} segments...")
-                
-                progress.advance(align_task_id)
+            else:
+                align_results.append((i, sub.start.ordinal, None, sub.end.ordinal - sub.start.ordinal))
+            
+            if (i + 1) % 50 == 0 or i == len(subs) - 1:
+                console.print(f" [dim]Align Progress: {i+1}/{len(subs)}[/dim]")
 
     # --- PHASE 3: FINALIZE WITH FFmpeg CONCAT ---
     console.print("[cyan]Dang ket xuat am thanh cuoi cung (FFmpeg Concat)...[/cyan]")
