@@ -304,48 +304,62 @@ def run_asr(audio_in: str, srt_out: str, batch_size: int = 4, mode="normal", vid
     download_root = 'models/ASR/whisper'
     os.makedirs(download_root, exist_ok=True)
 
-    # Bước 1: Load WhisperX Model
-    console.print(f"[bold cyan]Đang nạp mô hình WhisperX (large-v3) [batch={batch_size}]...[/bold cyan]")
-    compute_type = "int8_float16" if device == "cuda" else "int8"
-    
-    try:
-        model = whisperx.load_model("large-v3", device, compute_type=compute_type, download_root=download_root)
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeRemainingColumn
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(bar_width=None),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        console=console
+    ) as progress:
         
-        console.print(f"[bold yellow]Đang tiến hành nhận dạng tiếng Trung (zh)...[/bold yellow]")
-        result = model.transcribe(audio_in, batch_size=batch_size, language='zh')
+        # Bước 1: Load WhisperX Model
+        main_task = progress.add_task("Đang nạp mô hình WhisperX (large-v3)...", total=100)
+        compute_type = "int8_float16" if device == "cuda" else "int8"
         
-        # TỐI ƯU: Đảm bảo GPU xong hoàn toàn trước khi free
-        del model
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()  # Chờ GPU xong tất cả operations
-            torch.cuda.empty_cache()
+        try:
+            model = whisperx.load_model("large-v3", device, compute_type=compute_type, download_root=download_root)
+            progress.update(main_task, completed=30, description="Đang nhận dạng tiếng Trung (zh)...")
             
-        # Bước 2: Alignment
-        console.print(f"[bold cyan]Đang khớp thời gian (Alignment)...[/bold cyan]")
-        model_a, metadata = whisperx.load_align_model(language_code="zh", device=device, model_dir=download_root)
-        
-        target = getattr(model_a, "processor", model_a)
-        if target is not None and not hasattr(target, 'sampling_rate'):
-            target.sampling_rate = 16000
+            result = model.transcribe(audio_in, batch_size=batch_size, language='zh')
+            progress.update(main_task, completed=70)
             
-        aligned_result = whisperx.align(result["segments"], model_a, metadata, audio_in, device, return_char_alignments=False)
-        
-        # Bước 3: Xuất kết quả
-        save_as_srt(aligned_result["segments"], srt_out, video_in=video_in, roi=roi, sim=sim, fps=fps)
-        
-        console.print(f"[bold green]NHẬN DẠNG HOÀN TẤT![/bold green]")
-        console.print(f"- SRT Output: {srt_out}")
+            # TỐI ƯU: Giải phóng GPU Whisper hoàn toàn
+            del model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                
+            # Bước 2: Alignment
+            progress.update(main_task, completed=80, description="Đang khớp thời gian (Alignment)...")
+            model_a, metadata = whisperx.load_align_model(language_code="zh", device=device, model_dir=download_root)
+            
+            target = getattr(model_a, "processor", model_a)
+            if target is not None and not hasattr(target, 'sampling_rate'):
+                target.sampling_rate = 16000
+                
+            aligned_result = whisperx.align(result["segments"], model_a, metadata, audio_in, device, return_char_alignments=False)
+            progress.update(main_task, completed=95, description="Đang kết xuất tệp phụ đề...")
+            
+            # Bước 3: Xuất kết quả
+            save_as_srt(aligned_result["segments"], srt_out, video_in=video_in, roi=roi, sim=sim, fps=fps)
+            progress.update(main_task, completed=100)
+            
+            console.print(f"[bold green]✅ NHẬN DẠNG HOÀN TẤT![/bold green]")
+            console.print(f" [dim]• SRT Output: {os.path.basename(srt_out)}[/dim]")
 
-        del model_a, metadata, result, aligned_result
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
+            # Giải phóng GPU Alignment
+            del model_a, metadata, result, aligned_result
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
 
-    except Exception as e:
-        console.print(f"[bold red]Lỗi Module 2:[/bold red] {str(e)}")
-        raise
+        except Exception as e:
+            console.print(f"[bold red]❌ Lỗi Module 2:[/bold red] {str(e)}")
+            raise e
 
 def main():
     parser = argparse.ArgumentParser(description="Module 2: Nhận dạng giọng nói Trung Quốc (Tối ưu VRAM)")

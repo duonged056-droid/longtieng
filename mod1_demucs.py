@@ -165,8 +165,9 @@ def separate_audio(audio_path: str, vocal_out: str, bgm_out: str, model_name: st
     audio_dur = get_audio_duration_sec(audio_path)
     
     if audio_dur > LONG_VIDEO_THRESHOLD_SEC:
-        # ========== SEGMENT MODE (Video >2h) ==========
-        console.print(f"[bold yellow]📐 VIDEO DÀI ({audio_dur/3600:.1f}h) — Chuyển sang SEGMENT MODE (mỗi đoạn {SEGMENT_DURATION_SEC//60} phút)[/bold yellow]")
+        # ========== SEGMENT MODE (Video >2h - PREMIUM) ==========
+        console.print(f"[bold yellow]📐 VIDEO SIÊU DÀI ({audio_dur/3600:.2f}h)[/bold yellow]")
+        console.print(f"[dim]  + Chế độ: SEGMENT MODE (Cắt lát {SEGMENT_DURATION_SEC//60}p)[/dim]")
         
         temp_dir = os.path.dirname(vocal_out)
         vocal_parts = []
@@ -174,41 +175,56 @@ def separate_audio(audio_path: str, vocal_out: str, bgm_out: str, model_name: st
         
         seg_idx = 0
         current_sec = 0
-        
-        while current_sec < audio_dur:
-            seg_start = max(0, current_sec - OVERLAP_SEC) if seg_idx > 0 else 0
-            seg_dur = SEGMENT_DURATION_SEC + (OVERLAP_SEC if seg_idx > 0 else 0)
-            seg_dur = min(seg_dur, audio_dur - seg_start)
+        total_segments = int(np.ceil(audio_dur / SEGMENT_DURATION_SEC))
+
+        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeRemainingColumn
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(bar_width=None),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            main_task = progress.add_task("Đang tách âm thanh đa tầng...", total=total_segments)
             
-            seg_audio = os.path.join(temp_dir, f"_seg_audio_{seg_idx}.wav")
-            seg_vocal = os.path.join(temp_dir, f"_seg_vocal_{seg_idx}.wav")
-            seg_bgm = os.path.join(temp_dir, f"_seg_bgm_{seg_idx}.wav")
-            
-            console.print(f"  [cyan]▶ Đoạn {seg_idx+1}: {seg_start/60:.1f}m → {(seg_start+seg_dur)/60:.1f}m[/cyan]")
-            
-            # Extract segment audio
-            source = video_path if video_path else audio_path
-            extract_audio_segment(source, seg_audio, seg_start, seg_dur)
-            
-            # Tách
-            separate_single(separator, seg_audio, seg_vocal, seg_bgm)
-            
-            vocal_parts.append(seg_vocal)
-            bgm_parts.append(seg_bgm)
-            
-            # Xóa segment audio tạm ngay
-            if os.path.exists(seg_audio):
-                os.remove(seg_audio)
-            
-            # Force GPU cleanup sau mỗi segment
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            seg_idx += 1
-            current_sec += SEGMENT_DURATION_SEC
+            while current_sec < audio_dur:
+                seg_start = max(0, current_sec - OVERLAP_SEC) if seg_idx > 0 else 0
+                seg_dur = SEGMENT_DURATION_SEC + (OVERLAP_SEC if seg_idx > 0 else 0)
+                seg_dur = min(seg_dur, audio_dur - seg_start)
+                
+                seg_audio = os.path.join(temp_dir, f"_seg_audio_{seg_idx}.wav")
+                seg_vocal = os.path.join(temp_dir, f"_seg_vocal_{seg_idx}.wav")
+                seg_bgm = os.path.join(temp_dir, f"_seg_bgm_{seg_idx}.wav")
+                
+                progress.update(main_task, description=f"Đang xử lý Đoạn {seg_idx+1}/{total_segments}...")
+                
+                # Extract segment audio
+                source = video_path if video_path else audio_path
+                extract_audio_segment(source, seg_audio, seg_start, seg_dur)
+                
+                # Tách
+                separate_single(separator, seg_audio, seg_vocal, seg_bgm)
+                
+                vocal_parts.append(seg_vocal)
+                bgm_parts.append(seg_bgm)
+                
+                # Xóa segment audio tạm ngay
+                if os.path.exists(seg_audio):
+                    os.remove(seg_audio)
+                
+                # TỐI ƯU CỰC ĐỘ: Force GPU cleanup triệt để
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+                gc.collect()
+                
+                progress.advance(main_task)
+                seg_idx += 1
+                current_sec += SEGMENT_DURATION_SEC
         
         # Ghép nối kết quả
-        console.print("[cyan]Đang ghép nối kết quả...[/cyan]")
+        console.print("[bold cyan]🔄 Đang hợp nhất các lát cắt (Merging segments)...[/bold cyan]")
         concat_wav_files(vocal_parts, vocal_out, overlap_sec=OVERLAP_SEC if len(vocal_parts) > 1 else 0)
         concat_wav_files(bgm_parts, bgm_out, overlap_sec=OVERLAP_SEC if len(bgm_parts) > 1 else 0)
         
@@ -218,17 +234,18 @@ def separate_audio(audio_path: str, vocal_out: str, bgm_out: str, model_name: st
                 os.remove(f)
     else:
         # ========== NORMAL MODE (Video <=2h) ==========
-        console.print(f"[bold yellow]Đang tiến hành tách âm thanh... (Vui lòng đợi)[/bold yellow]")
+        console.print(f"[bold yellow]⚡ Đang tiến hành tách âm thanh trực tiếp...[/bold yellow]")
         separate_single(separator, audio_path, vocal_out, bgm_out)
 
-    console.print(f"[bold green]TÁCH ÂM THÀNH CÔNG![/bold green]")
-    console.print(f"- Vocal: {vocal_out}")
-    console.print(f"- BGM: {bgm_out}")
+    console.print(f"[bold green]✅ TÁCH ÂM THÀNH CÔNG![/bold green]")
+    console.print(f" [dim]• Vocals: {os.path.basename(vocal_out)}[/dim]")
+    console.print(f" [dim]• BGM:    {os.path.basename(bgm_out)}[/dim]")
 
-    # Giải phóng VRAM
+    # Giải phóng VRAM toàn phần
     del separator
     gc.collect()
     if torch.cuda.is_available():
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
 def main():
