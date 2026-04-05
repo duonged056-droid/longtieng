@@ -35,10 +35,14 @@ def get_tiktok_session():
         with open(".env", "r", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("TIKTOK_SESSION_ID="):
-                    return line.split("=", 1)[1].strip()
+                    env_session = line.split("=", 1)[1].strip()
+                    if env_session:
+                        return env_session
     except Exception:
         pass
-    return ""
+    
+    # ID cứng phòng hờ nếu mất file .env
+    return "9bd1a9b86b51abca383eded216b33134" 
 
 def tiktok_tts(text, voice, output_path):
     session_id = get_tiktok_session()

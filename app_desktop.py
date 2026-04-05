@@ -346,6 +346,22 @@ class BumYTCloneExactApp(ctk.CTk):
         self.opt_voice_id.set("Edge Hoài My (Nữ YouTube)")
         self.opt_voice_id.grid(row=1, column=1, padx=5, pady=5)
         
+        # --- BẮT ĐẦU ĐOẠN THÊM MỚI: Ô NHẬP TIKTOK SESSION ID ---
+        ctk.CTkLabel(v_grid, text="TikTok Session:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.entry_tiktok_session = ctk.CTkEntry(v_grid, width=350, placeholder_text="Nhập sessionid của TikTok (Bắt buộc nếu xài giọng TikTok)")
+        self.entry_tiktok_session.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        
+        # Tự động đọc ID cũ từ file .env lên giao diện (nếu có)
+        try:
+            with open(".env", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("TIKTOK_SESSION_ID="):
+                        self.entry_tiktok_session.insert(0, line.split("=", 1)[1].strip())
+        except Exception:
+            # Nếu chưa có file .env, điền tạm cái ID cũ
+            self.entry_tiktok_session.insert(0, "9bd1a9b86b51abca383eded216b33134")
+        # --- KẾT THÚC ĐOẠN THÊM MỚI ---
+        
         # Card 2: FILE & DỰ ÁN
         card_proj = ctk.CTkFrame(scroll, fg_color=B_SIDEBAR, corner_radius=15, border_width=1, border_color="#2b2b2b")
         card_proj.pack(fill="x", pady=10)
@@ -585,6 +601,12 @@ class BumYTCloneExactApp(ctk.CTk):
                 return
         
         self.log(f"\n>>> BẮT ĐẦU XỬ LÝ (Dubbing & Sync) - {time.strftime('%H:%M:%S')}")
+        
+        # TỰ ĐỘNG LƯU TIKTOK SESSION ID TỪ GIAO DIỆN VÀO FILE .ENV
+        t_session = self.entry_tiktok_session.get().strip()
+        if t_session:
+            with open(".env", "w", encoding="utf-8") as f:
+                f.write(f"TIKTOK_SESSION_ID={t_session}\n")
         
         # Mapping voice config
         tts_prov = self.opt_tts_prov.get()
