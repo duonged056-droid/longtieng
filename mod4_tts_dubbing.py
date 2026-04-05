@@ -81,12 +81,15 @@ async def edge_tts_gen(text, voice, output_path):
         return False
 
 async def edge_tts_batch(tasks_list, progress=None, task_id=None):
-    """Chạy nhiều Edge TTS đồng thời qua asyncio.gather."""
+    """Chạy nhiều Edge TTS đồng thời qua asyncio.gather có giới hạn Semaphore 10."""
+    sem = asyncio.Semaphore(10) # BỘ ĐẾM GIỚI HẠN 10 LUỒNG
+
     async def _single(text, voice, output_path):
-        success = await edge_tts_gen(text, voice, output_path)
-        if progress and task_id is not None:
-            progress.advance(task_id)
-        return success
+        async with sem:
+            success = await edge_tts_gen(text, voice, output_path)
+            if progress and task_id is not None:
+                progress.advance(task_id)
+            return success
     
     coros = [_single(t, v, o) for t, v, o in tasks_list]
     return await asyncio.gather(*coros)
@@ -165,6 +168,11 @@ def main():
     max_speed_ratio = float(args.max_speed_ratio)
     ffmpeg_cmd = args.ffmpeg_path
     ffprobe_cmd = ffmpeg_cmd.replace("ffmpeg.exe", "ffprobe.exe") if "ffmpeg.exe" in ffmpeg_cmd else "ffprobe"
+
+    # THÊM 3 DÒNG SAU ĐỂ TRÁNH LỖI TRÊN MÁY KHÁC (Pydub FFmpeg mapping):
+    AudioSegment.converter = ffmpeg_cmd
+    from pydub.utils import get_prober_name
+    AudioSegment.ffprobe = ffprobe_cmd
 
     mapping = {}
     if args.speaker_mapping:
@@ -294,6 +302,8 @@ def main():
             
             if aligned_path and os.path.exists(aligned_path):
                 f.write(f"file '{os.path.basename(aligned_path)}'\n")
+                # BỔ SUNG: Khóa cứng thời gian từng câu TTS
+                f.write(f"outpoint {duration_ms / 1000.0:.3f}\n")
                 current_timeline_ms += duration_ms
             else:
                 dur_sec = (subs[idx].end.ordinal - subs[idx].start.ordinal) / 1000.0

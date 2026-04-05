@@ -123,6 +123,8 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
                 
                 if os.path.exists(wav_p):
                     f.write(f"file '{os.path.abspath(wav_p)}'\n")
+                    # BỔ SUNG: Ép FFmpeg cắt chính xác để chống lệch timeline
+                    f.write(f"outpoint {seg['new_dur'] / 1000.0:.3f}\n")
                     current_ms += seg["new_dur"]
                 else:
                     # Silence thay thế
@@ -329,12 +331,15 @@ def main():
             dur_sec = eff_dur_ms / 1000.0
             
             # Khởi tạo mỗi Video Segment = 1 input để ngăn ffmpeg đệm (buffer leak) toàn bộ RAM
+            # BỔ SUNG: Thêm -accurate_seek để cắt mượt không dính Keyframe
             cmd_inputs.extend(['-ss', f"{s_sec:.3f}"])
+            cmd_inputs.extend(['-accurate_seek'])
             cmd_inputs.extend(['-t', f"{dur_sec:.3f}"])
             cmd_inputs.extend(['-i', args.video_in])
             
             slow_factor = eff_new_dur_ms / eff_dur_ms
-            filter_lines.append(f"[{i}:v]setpts={slow_factor:.6f}*(PTS-STARTPTS)[v{i}];")
+            # BỔ SUNG: Thêm fps={fps:.2f} để đồng bộ frame, chống giật khựng
+            filter_lines.append(f"[{i}:v]setpts={slow_factor:.6f}*(PTS-STARTPTS),fps={fps:.2f}[v{i}];")
             cv_in += f"[v{i}]"
             
         next_in_idx = len(chunk_segs)
@@ -377,7 +382,8 @@ def main():
                     filter_lines.append(f"[{bgm_input_idx}:a]asetpts=PTS-STARTPTS,atrim=start={rel_s:.3f}:end={rel_e:.3f},asetpts=PTS-STARTPTS,{atempo_str}[abgm{i}];")
             else:
                 target_d = eff_new_dur_ms / 1000.0
-                filter_lines.append(f"aevalsrc=0:d={target_d:.3f}[abgm{i}];")
+                # BỔ SUNG: Khớp 44100Hz Stereo của Demucs
+                filter_lines.append(f"anullsrc=r=44100:cl=stereo:d={target_d:.3f}[abgm{i}];")
             ca_bgm_in += f"[abgm{i}]"
 
             # Vocals
@@ -387,18 +393,24 @@ def main():
                 filter_lines.append(f"[{voc_input_idx}:a]asetpts=PTS-STARTPTS,atrim=start={voc_rel_start:.3f}:end={voc_rel_end:.3f},asetpts=PTS-STARTPTS[avoc{i}];")
             else:
                 target_d = eff_new_dur_ms / 1000.0
-                filter_lines.append(f"aevalsrc=0:d={target_d:.3f}[avoc{i}];")
+                # BỔ SUNG: Khớp 24000Hz Mono của TTS
+                filter_lines.append(f"anullsrc=r=24000:cl=mono:d={target_d:.3f}[avoc{i}];")
             ca_voc_in += f"[avoc{i}]"
         
         filter_lines.append(f"{cv_in}concat=n={len(chunk_segs)}:v=1:a=0[outv];")
         filter_lines.append(f"{ca_bgm_in}concat=n={len(chunk_segs)}:v=0:a=1[abgm_final];")
         filter_lines.append(f"{ca_voc_in}concat=n={len(chunk_segs)}:v=0:a=1[avoc_final];")
         
-        filter_lines.append(f"[avoc_final]volume={args.vocal_vol}[v_vol];")
-        filter_lines.append(f"[abgm_final]volume={args.bgm_vol}[b_vol];")
-        filter_lines.append(f"[v_vol]asplit[v_vol1][v_vol2];")
-        filter_lines.append(f"[b_vol]asplit[b_vol1][b_vol2];")
-        filter_lines.append(f"[v_vol1][b_vol1]amix=inputs=2:duration=longest[outa]")
+        # BỔ SUNG: Tách luồng gốc 100% TRƯỚC KHI áp dụng volume
+        filter_lines.append(f"[avoc_final]asplit=2[v_mix][v_vol2];")
+        filter_lines.append(f"[abgm_final]asplit=2[b_mix][b_vol2];")
+        
+        # Bóp volume chỉ dành cho bản Mix gộp vào video mp4 dự phòng
+        filter_lines.append(f"[v_mix]volume={args.vocal_vol}[v_vol1];")
+        filter_lines.append(f"[b_mix]volume={args.bgm_vol}[b_vol1];")
+        
+        # Trộn mix, thêm normalize=0 để không bị bóp nghẹt tiếng
+        filter_lines.append(f"[v_vol1][b_vol1]amix=inputs=2:duration=longest:normalize=0[outa]")
             
         console.print(f"  > Render cum {c_idx+1}/{num_chunks} (Tối ưu Zero-Buffer: {len(chunk_segs)} video inputs)...")
         run_ffmpeg_chunk(

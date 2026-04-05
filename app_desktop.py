@@ -363,7 +363,13 @@ class BumYTCloneExactApp(ctk.CTk):
 
         ctk.CTkLabel(p_grid, text="FFmpeg:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.entry_ffmpeg = ctk.CTkEntry(p_grid, height=35)
-        default_ffmpeg = os.path.abspath(os.path.join(os.path.dirname(__file__), "ffmpeg-2026-03-30-git-e54e117998-full_build", "bin", "ffmpeg.exe"))
+        # TỰ ĐỘNG QUÉT TÌM FFmpeg TRÁNH HARDCODE
+        default_ffmpeg = "ffmpeg"
+        base_dir = os.path.dirname(__file__)
+        for root, dirs, files in os.walk(base_dir):
+            if "ffmpeg.exe" in files:
+                default_ffmpeg = os.path.abspath(os.path.join(root, "ffmpeg.exe"))
+                break
         self.entry_ffmpeg.insert(0, default_ffmpeg.replace("\\", "/"))
         self.entry_ffmpeg.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
         ctk.CTkButton(p_grid, text="Cấu hình...", width=100, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_ffmpeg, [("Exe", "*.exe")])).grid(row=2, column=2, padx=5)
