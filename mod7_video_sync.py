@@ -169,8 +169,9 @@ def run_ffmpeg_chunk(ffmpeg_cmd, cmd_inputs, filter_content, output_ts, use_gpu,
     - Thêm HW decoder nếu có.
     """
     
-    if use_gpu and has_cuda_dec:
-        hw_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+    # MỞ KHÓA LUỒNG: Bắt GPU giải mã (Decode) sau đó nhả lại RAM cho CPU làm Filter
+    if use_gpu:
+        hw_args = ["-hwaccel", "auto"]
     else:
         hw_args = []
     
@@ -247,40 +248,59 @@ def main():
         console.print(f"  Canh bao: Khong tim thay {args.timing_json}.")
         return
 
-    # 3. Tinh toan Timeline Shifting
+    # 3. Tinh toan Timeline Shifting (TỐI ƯU CHỐNG GIÃN NỞ VIDEO)
     new_segments = []
     current_new_time_ms = 0
     prev_orig_end_ms = 0
 
-    for item in timing_data:
+    for i, item in enumerate(timing_data):
         orig_start = item["sub_start_ms"]
         orig_end = item["sub_end_ms"]
         tts_dur = item["tts_duration_ms"]
         orig_dur = item["sub_duration_ms"]
 
+        # Khoảng trống (Gap) trước câu này
         if orig_start > prev_orig_end_ms:
-            gap_dur = orig_start - prev_orig_end_ms
-            new_segments.append({
-                "type": "gap", "start": prev_orig_end_ms, "end": orig_start,
-                "dur": gap_dur, "new_dur": gap_dur, "new_start": current_new_time_ms
-            })
-            current_new_time_ms += gap_dur
+            orig_gap_dur = orig_start - prev_orig_end_ms
+            
+            # Tính toán thời gian bị dôi ra từ các câu trước
+            time_drift = current_new_time_ms - prev_orig_end_ms
+            
+            # Ăn bớt khoảng trống để bù trừ độ trễ (nhưng không được nhỏ hơn 0)
+            new_gap_dur = max(0, orig_gap_dur - time_drift)
+            
+            if new_gap_dur > 0:
+                new_segments.append({
+                    "type": "gap", "start": prev_orig_end_ms, "end": prev_orig_end_ms + orig_gap_dur,
+                    "dur": orig_gap_dur, "new_dur": new_gap_dur, "new_start": current_new_time_ms
+                })
+                current_new_time_ms += new_gap_dur
 
-        target_dur = max(orig_dur, tts_dur)
+        # Xử lý đoạn có thoại
+        # Nếu câu trước giãn ra xâm lấn vào câu này, đẩy thời gian bắt đầu lên
+        actual_start_time = max(current_new_time_ms, orig_start) 
+        
+        # Giới hạn mức độ kéo giãn tối đa là 1.5x để video không bị nhão
+        target_dur = min(max(orig_dur, tts_dur), int(orig_dur * 1.5))
+        
         new_segments.append({
             "type": "sub", "index": item["index"], "start": orig_start, "end": orig_end,
-            "dur": orig_dur, "new_dur": target_dur, "new_start": current_new_time_ms
+            "dur": orig_dur, "new_dur": target_dur, "new_start": actual_start_time
         })
-        current_new_time_ms += target_dur
+        current_new_time_ms = actual_start_time + target_dur
         prev_orig_end_ms = orig_end
 
+    # Xử lý đoạn đuôi video
     if prev_orig_end_ms < video_dur_ms:
         gap_dur = video_dur_ms - prev_orig_end_ms
-        new_segments.append({
-            "type": "gap", "start": prev_orig_end_ms, "end": video_dur_ms,
-            "dur": gap_dur, "new_dur": gap_dur, "new_start": current_new_time_ms
-        })
-        current_new_time_ms += gap_dur
+        time_drift = current_new_time_ms - prev_orig_end_ms
+        new_gap_dur = max(0, gap_dur - time_drift)
+        
+        if new_gap_dur > 0:
+            new_segments.append({
+                "type": "gap", "start": prev_orig_end_ms, "end": video_dur_ms,
+                "dur": gap_dur, "new_dur": new_gap_dur, "new_start": current_new_time_ms
+            })
 
     # TỐI ƯU: Pre-merge vocals thành 1 file
     console.print("[cyan]--- Pre-merge vocals thành 1 file (Tiết kiệm RAM) ---[/cyan]")

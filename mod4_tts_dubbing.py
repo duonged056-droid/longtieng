@@ -23,7 +23,8 @@ import edge_tts
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeRemainingColumn
 
-console = Console()
+# Ép thư viện không dùng ký tự điều khiển động để chống tắc ống dẫn UI
+console = Console(force_terminal=False, force_interactive=False)
 
 # --- Cấu hình song song ---
 MAX_TTS_WORKERS = 6       # Số luồng TikTok TTS
@@ -76,27 +77,55 @@ def tiktok_tts(text, voice, output_path):
         return False, str(e)
 
 # --- Edge TTS Implementation ---
-async def edge_tts_gen(text, voice, output_path):
+async def edge_tts_gen(text, voice_config, output_path):
     try:
-        communicate = edge_tts.Communicate(text, voice)
+        # Tách chuỗi config để lấy ID giọng, Tốc độ, và Độ trầm
+        parts = voice_config.split('|')
+        voice_id = parts[0]
+        rate = parts[1] if len(parts) > 1 else "+0%"
+        pitch = parts[2] if len(parts) > 2 else "+0Hz"
+        
+        communicate = edge_tts.Communicate(text, voice_id, rate=rate, pitch=pitch)
         await communicate.save(output_path)
         return True
     except Exception:
         return False
 
 async def edge_tts_batch(tasks_list, progress=None, task_id=None):
-    """Chạy nhiều Edge TTS đồng thời qua asyncio.gather có giới hạn Semaphore 10."""
-    sem = asyncio.Semaphore(10) # BỘ ĐẾM GIỚI HẠN 10 LUỒNG
+    """Chạy nhiều Edge TTS đồng thời (Chia Chunk để chống sập Loop và khóa IP)."""
+    sem = asyncio.Semaphore(10) # Tối đa 10 luồng gọi lên server cùng lúc
+    results = []
 
     async def _single(text, voice, output_path):
         async with sem:
-            success = await edge_tts_gen(text, voice, output_path)
-            if progress and task_id is not None:
-                progress.advance(task_id)
-            return success
-    
-    coros = [_single(t, v, o) for t, v, o in tasks_list]
-    return await asyncio.gather(*coros)
+            # Cố gắng retry 3 lần nếu máy chủ từ chối
+            for attempt in range(3):
+                try:
+                    success = await edge_tts_gen(text, voice, output_path)
+                    if success:
+                        if progress and task_id is not None:
+                            progress.advance(task_id)
+                        return True
+                except Exception:
+                    await asyncio.sleep(2) # Nghỉ 2s trước khi thử lại
+
+        # Chấp nhận bỏ qua nếu hỏng cả 3 lần để không bị treo vĩnh viễn
+        if progress and task_id is not None:
+            progress.advance(task_id)
+        return False
+
+    # BÍ QUYẾT XỬ LÝ SIÊU VIDEO: Cắt thành từng cụm 50 câu
+    chunk_size = 50
+    for i in range(0, len(tasks_list), chunk_size):
+        chunk = tasks_list[i:i+chunk_size]
+        coros = [_single(t, v, o) for t, v, o in chunk]
+        res = await asyncio.gather(*coros)
+        results.extend(res)
+
+        # Nghỉ 1 giây giữa các cụm để máy chủ không khóa IP
+        await asyncio.sleep(1)
+
+    return results
 
 def get_audio_duration_fast(path):
     """TỐI ƯU: Đo duration bằng pydub in-process thay vì subprocess ffprobe.
@@ -136,7 +165,7 @@ def align_audio(ffmpeg_cmd, ffprobe_cmd, input_audio, duration_target, output_wa
     ratio = current_dur / max(0.1, duration_target)
     
     # Clip speed ratio
-    if ratio < 0.5: ratio = 0.5
+    if ratio < 1.0: ratio = 1.0  # TỐI ƯU CHỐNG MÉO TIẾNG: Không kéo giãn âm thanh nếu AI đọc cuốn và nhanh hơn video gốc
     if ratio > max_speed_ratio: ratio = max_speed_ratio
     
     # Standardize: 24kHz, 1ch, mono
@@ -230,7 +259,7 @@ def main():
                         gen_results[t["idx"]] = True
                         progress.advance(main_task_id)
                     else:
-                        fallback_voice = "vi-VN-NamMinhNeural" if t["voice"] == "vi_vn_001" else "vi-VN-HoaiMyNeural"
+                        fallback_voice = "vi-VN-NamMinhNeural|+0%|+0Hz" if t["voice"] == "vi_vn_001" else "vi-VN-HoaiMyNeural|+0%|+0Hz"
                         fallback_tasks.append((t["content"], fallback_voice, t["raw_path"], t["idx"]))
 
         # Edge & Fallback Generation (Batch)

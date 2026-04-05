@@ -48,7 +48,7 @@ import pysrt
 
 try:
     import cv2
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk, ImageDraw, ImageFont
     HAS_CV2 = True
 except ImportError:
     HAS_CV2 = False
@@ -103,9 +103,13 @@ class BumYTCloneExactApp(ctk.CTk):
         self.left_panel = self._build_left_panel()
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(20, 10), pady=20)
 
-        # ==================== RIGHT PANEL: CONTROLS & LOGS ====================
+        # ==================== CONTROLS & LOGS ====================
         self.right_panel = self._build_right_panel()
         self.right_panel.grid(row=0, column=1, sticky="nsew", padx=(10, 20), pady=20)
+
+        # ==================== PROCESS MANAGEMENT ====================
+        self.active_processes = []
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def pick_file(self, entry_widget, filetypes, title="Chọn File"):
         filename = filedialog.askopenfilename(title=title, filetypes=filetypes)
@@ -416,6 +420,42 @@ class BumYTCloneExactApp(ctk.CTk):
         self.chk_all_clean = ctk.CTkCheckBox(m_grid, text="🗑️ Chế độ dọn dẹp dự án (Cleanup)")
         self.chk_all_clean.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="w")
 
+        # --- BẮT ĐẦU ĐOẠN THÊM MỚI: CARD 4 - HARDSUB ---
+        card_sub = ctk.CTkFrame(scroll, fg_color=B_SIDEBAR, corner_radius=15, border_width=1, border_color="#2b2b2b")
+        card_sub.pack(fill="x", pady=10)
+        ctk.CTkLabel(card_sub, text="🔤 4. Cấu hình Phụ đề (Hardsub)", font=ctk.CTkFont(size=14, weight="bold"), text_color=B_SUCCESS).pack(anchor="w", padx=15, pady=10)
+        
+        s_grid = ctk.CTkFrame(card_sub, fg_color="transparent")
+        s_grid.pack(fill="x", padx=15, pady=(0, 15))
+        
+        self.chk_hardsub = ctk.CTkCheckBox(s_grid, text="Bật chèn cứng Phụ đề (Hardsub)", text_color=B_ACCENT, command=self._redraw_current_frame)
+        self.chk_hardsub.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+        
+        ctk.CTkLabel(s_grid, text="Style chữ:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.opt_sub_style = ctk.CTkOptionMenu(s_grid, values=["Trắng viền đen (Cơ bản)", "Vàng viền đen (Đậm)", "Trắng bóng đổ Neon", "Trắng nền hộp mờ"], command=lambda x: self._redraw_current_frame())
+        self.opt_sub_style.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        
+        ctk.CTkLabel(s_grid, text="Căn lề Dưới (Y):").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.slider_sub_y = ctk.CTkSlider(s_grid, from_=5, to=100, command=lambda x: self._redraw_current_frame())
+        self.slider_sub_y.set(30)
+        self.slider_sub_y.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+
+        ctk.CTkLabel(s_grid, text="Cỡ chữ (Size):").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        self.slider_font_size = ctk.CTkSlider(s_grid, from_=10, to=80, command=lambda x: self._redraw_current_frame())
+        self.slider_font_size.set(22)
+        self.slider_font_size.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+
+        ctk.CTkLabel(s_grid, text="Độ dày viền (Outline):").grid(row=4, column=0, padx=10, pady=5, sticky="w")
+        self.slider_outline = ctk.CTkSlider(s_grid, from_=0, to=15, command=lambda x: self._redraw_current_frame())
+        self.slider_outline.set(2)
+        self.slider_outline.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
+        
+        ctk.CTkLabel(s_grid, text="Đổ bóng chữ (Shadow):").grid(row=5, column=0, padx=10, pady=5, sticky="w")
+        self.slider_shadow = ctk.CTkSlider(s_grid, from_=0, to=15, command=lambda x: self._redraw_current_frame())
+        self.slider_shadow.set(0)
+        self.slider_shadow.grid(row=5, column=1, padx=5, pady=5, sticky="ew")
+        # --- KẾT THÚC ĐOẠN THÊM MỚI ---
+
         # Start Button
         ctk.CTkButton(scroll, text="🚀 BẮT ĐẦU XỬ LÝ", height=60, fg_color=B_ACCENT, corner_radius=30, font=ctk.CTkFont(size=18, weight="bold"), command=self.run_tab3).pack(fill="x", padx=20, pady=20)
         
@@ -462,6 +502,49 @@ class BumYTCloneExactApp(ctk.CTk):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame_rgb)
         img_resized = img.resize((nw, nh), Image.Resampling.LANCZOS)
+        
+        # --- BẮT ĐẦU: VẼ LIVE PREVIEW PHỤ ĐỀ LÊN KHUNG HÌNH ---
+        if hasattr(self, 'chk_hardsub') and self.chk_hardsub.get():
+            try:
+                draw = ImageDraw.Draw(img_resized)
+                f_size = int(self.slider_font_size.get() * self.scale_f * 1.5)
+                out_th = int(self.slider_outline.get() * self.scale_f)
+                shad_th = int(self.slider_shadow.get() * self.scale_f)
+                
+                try:
+                    font = ImageFont.truetype("arialbd.ttf", f_size)
+                except:
+                    font = ImageFont.load_default()
+
+                sample_text = "YTDUONG - Test Sub CapCut"
+                style = self.opt_sub_style.get()
+                margin_v = int(self.slider_sub_y.get() * self.scale_f * 2)
+                
+                # Tính toán tọa độ để chữ nằm giữa
+                bbox = draw.textbbox((0, 0), sample_text, font=font)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                tx = (nw - tw) / 2
+                ty = nh - th - margin_v
+
+                # Đổ bóng
+                if shad_th > 0:
+                    draw.text((tx+shad_th, ty+shad_th), sample_text, font=font, fill="black")
+
+                # Áp dụng màu và viền
+                if "Vàng" in style:
+                    draw.text((tx, ty), sample_text, font=font, fill="#FFFF00", stroke_width=out_th, stroke_fill="black")
+                elif "hộp mờ" in style:
+                    pad = int(8 * self.scale_f)
+                    draw.rectangle([tx-pad, ty-pad, tx+tw+pad, ty+th+pad], fill=(0,0,0,140))
+                    draw.text((tx, ty), sample_text, font=font, fill="white")
+                elif "Neon" in style:
+                    draw.text((tx+int(2*self.scale_f), ty+int(2*self.scale_f)), sample_text, font=font, fill="#ff00ff")
+                    draw.text((tx, ty), sample_text, font=font, fill="white", stroke_width=out_th, stroke_fill="black")
+                else:
+                    draw.text((tx, ty), sample_text, font=font, fill="white", stroke_width=out_th, stroke_fill="black")
+            except Exception as e:
+                pass
+        # --- KẾT THÚC: LIVE PREVIEW ---
         
         self.tk_image = ImageTk.PhotoImage(img_resized)
         self.roi_canvas.delete("all") # Xóa hết cả ảnh cũ và hình cũ
@@ -572,8 +655,14 @@ class BumYTCloneExactApp(ctk.CTk):
             self.opt_voice_id.configure(values=["TikTok Nữ (Hà Nhân/Bảo Bối)", "TikTok Nữ trầm", "TikTok Nam"])
             self.opt_voice_id.set("TikTok Nữ (Hà Nhân/Bảo Bối)")
         elif "Edge" in choice:
-            self.opt_voice_id.configure(values=["Edge Hoài My (Nữ YouTube)", "Edge Nam Minh (Nam YouTube)"])
-            self.opt_voice_id.set("Edge Hoài My (Nữ YouTube)")
+            # MỚI: Thêm các lựa chọn giọng đã được "độ" lại thông số
+            self.opt_voice_id.configure(values=[
+                "Edge Hoài My (Nữ Cơ Bản)", 
+                "Edge Nam Minh (Nam Cơ Bản)",
+                "Edge Hoài My (Review Phim - Nhanh, Cuốn)",
+                "Edge Nam Minh (Kể Chuyện - Trầm Ấm)"
+            ])
+            self.opt_voice_id.set("Edge Hoài My (Review Phim - Nhanh, Cuốn)")
         else:
             self.opt_voice_id.configure(values=["Google Nữ", "Google Nam"])
             self.opt_voice_id.set("Google Nữ")
@@ -621,8 +710,15 @@ class BumYTCloneExactApp(ctk.CTk):
             elif "trầm" in voice_label: voice_id = "vi_vn_003"
             else: voice_id = "vi_vn_002"
         else:
-            if "Nam" in voice_label: voice_id = "vi-VN-NamMinhNeural"
-            else: voice_id = "vi-VN-HoaiMyNeural"
+            # BỔ SUNG: Ép thông số Pitch (Độ trầm) và Rate (Tốc độ) vào luồng xử lý
+            if "Review Phim" in voice_label:
+                voice_id = "vi-VN-HoaiMyNeural|+15%|+5Hz"
+            elif "Kể Chuyện" in voice_label:
+                voice_id = "vi-VN-NamMinhNeural|-10%|-5Hz"
+            elif "Nam" in voice_label: 
+                voice_id = "vi-VN-NamMinhNeural|+0%|+0Hz"
+            else: 
+                voice_id = "vi-VN-HoaiMyNeural|+0%|+0Hz"
             
         mapping = json.dumps({
             "SPEAKER_00": {"engine": engine, "voice": voice_id},
@@ -684,7 +780,44 @@ class BumYTCloneExactApp(ctk.CTk):
             self.log("⚠️ Không có nhiệm vụ nào được chọn!", level="warning")
             return
             
-        success_msg = f"DỰ ÁN ĐÃ HOÀN TẤT!\n\nBạn có thể đưa bộ file này vào CapCut:\n1. Video: {os.path.basename(video_synced)}\n2. Nhạc nền: {os.path.basename(bgm_synced)}\n3. Phụ đề: {os.path.basename(srt_synced)}"
+        # --- BẮT ĐẦU: GẮN PHỤ ĐỀ VÀO VIDEO BẰNG FFMPEG ---
+        if getattr(self, 'chk_hardsub', None) and self.chk_hardsub.get() and custom_video:
+            video_final_hardsub = os.path.join(self.out_dir, "video_FINAL_HARDSUB.mp4")
+            style_name = self.opt_sub_style.get()
+            
+            # Lấy thông số cấu hình từ UI
+            margin_v = int(self.slider_sub_y.get())
+            f_size = int(self.slider_font_size.get())
+            out_th = int(self.slider_outline.get())
+            shad_th = int(self.slider_shadow.get())
+            
+            # Tạo chuỗi Style cho Subtitles Filter (ASS Format)
+            ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline={out_th},Shadow={shad_th},MarginV={margin_v}"
+            if "Vàng" in style_name: 
+                ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,Outline={out_th},Shadow={shad_th},MarginV={margin_v}"
+            elif "hộp mờ" in style_name: 
+                ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H00FFFFFF,BackColour=&H80000000,BorderStyle=3,Outline=0,Shadow=0,MarginV={margin_v}"
+            elif "Neon" in style_name: 
+                ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H00FF00FF,Outline={out_th},Shadow={shad_th},MarginV={margin_v}"
+            
+            # QUAN TRỌNG: Lấy file srt_synced (Sub đã được làm chậm khớp nhip)
+            # Ép kiểu đường dẫn cho hệ điều hành Windows tránh lỗi dấu hai chấm ổ đĩa
+            srt_escaped = srt_synced.replace('\\', '/').replace(':', '\\\\:')
+            
+            # Đã chuyển sang GPU NVIDIA (h264_nvenc) để render siêu tốc độ
+            cmd_hardsub = [
+                ffmpeg_bin, '-y', 
+                '-hwaccel', 'auto', '-i', video_synced,
+                '-vf', f"subtitles='{srt_escaped}':force_style='{ass_style}'",
+                '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '26', '-c:a', 'copy', video_final_hardsub
+            ]
+            tasks.append(cmd_hardsub)
+            
+            success_msg = f"DỰ ÁN ĐÃ HOÀN TẤT!\n\nVideo Full Phụ Đề của bạn tại:\n👉 {os.path.basename(video_final_hardsub)}"
+        else:
+            success_msg = f"DỰ ÁN ĐÃ HOÀN TẤT!\n\nBạn có thể đưa bộ file này vào CapCut:\n1. Video: {os.path.basename(video_synced)}\n2. Nhạc nền: {os.path.basename(bgm_synced)}\n3. Phụ đề: {os.path.basename(srt_synced)}"
+        # --- KẾT THÚC: GẮN PHỤ ĐỀ ---
+
         threading.Thread(target=self._run_cmds, args=(tasks, success_msg, None, None)).start()
 
     def run_blur_only(self):
@@ -762,9 +895,12 @@ class BumYTCloneExactApp(ctk.CTk):
             self.log(f"> Đang xử lý: {os.path.basename(cmd[1])}...")
             try:
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=env, **kwargs)
+                self.active_processes.append(process) # Theo dõi để tắt khi đóng app
                 for line in iter(process.stdout.readline, ""):
                     self.log(line.strip())
                 rc = process.wait()
+                if process in self.active_processes:
+                    self.active_processes.remove(process)
                 if rc == 0:
                     # --- AUTO CLEANUP LOGIC ---
                     if self.chk_all_clean.get():
@@ -839,6 +975,33 @@ class BumYTCloneExactApp(ctk.CTk):
         self.log(success_msg, level="success")
         if callback:
             callback()
+
+    def on_closing(self):
+        """Xử lý khi đóng cửa sổ: Tắt toàn bộ tiến trình chạy ngầm."""
+        print("\n[!] Đang đóng ứng dụng, vui lòng chờ giây lát để dọn dẹp...")
+        
+        # 1. Tắt các process do app khởi tạo (Demucs, Whisper, Video Sync...)
+        if hasattr(self, 'active_processes'):
+            for p in self.active_processes:
+                try:
+                    if p.poll() is None: # Nếu vẫn đang chạy
+                        if sys.platform == "win32":
+                            # Dùng taskkill /T để diệt cả cây process
+                            subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
+                        else:
+                            p.terminate()
+                except:
+                    pass
+        
+        # 2. Quét sạch FFmpeg một lần nữa cho chắc
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/IM", "ffmpeg.exe"], capture_output=True)
+        except:
+            pass
+
+        self.destroy()
+        sys.exit(0)
 
 def route_cli():
     if getattr(sys, 'frozen', False) and len(sys.argv) > 1 and sys.argv[1].endswith(".py"):

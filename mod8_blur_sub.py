@@ -49,12 +49,9 @@ def main():
         console.print("[bold green]✅ GPU NVENC SẴN SÀNG![/bold green]")
         encoder = "h264_nvenc"
         preset = "p4"   # Ưu tiên chất lượng
-        # TỐI ƯU: Thêm CUDA HW Decode nếu có → full GPU pipeline
-        if has_cuda_dec:
-            hw_accel = ["-hwaccel", "cuda"]
-            console.print("[dim]  + CUDA Hardware Decode ENABLED[/dim]")
-        else:
-            hw_accel = []
+        # BẬT TỐI ƯU: Dùng chế độ Auto để ép Windows dùng GPU giải mã video gốc (D3D11VA/DXVA2)
+        hw_accel = ["-hwaccel", "auto"]
+        console.print("[dim]  + Hardware Video Decode ENABLED (CPU được giải phóng 100% lúc đọc file)[/dim]")
     else:
         encoder = "libx264"
         preset = "fast"
