@@ -758,6 +758,8 @@ class BumYTCloneExactApp(ctk.CTk):
                             # TỐI ƯU THEO YÊU CẦU: Xóa tất cả các file rác, chỉ giữ lại 3 file cuối cùng
                             keep_files = ["video_synced.mp4", "bgm_synced.wav", "vi_synced.srt"]
                             cleaned_count = 0
+                            
+                            # Xóa các file trong output/
                             for f in os.listdir(self.out_dir):
                                 if f not in keep_files:
                                     f_path = os.path.join(self.out_dir, f)
@@ -770,8 +772,22 @@ class BumYTCloneExactApp(ctk.CTk):
                                             shutil.rmtree(f_path)
                                             cleaned_count += 1
                                     except: pass
+                            
+                            # XEM THÊM: Xóa sạch file trong folder temp/ nhưng giữ lại folder theo yêu cầu
+                            if os.path.exists("temp"):
+                                try:
+                                    for f in os.listdir("temp"):
+                                        f_path = os.path.join("temp", f)
+                                        if os.path.isfile(f_path):
+                                            os.remove(f_path)
+                                    cleaned_count += 1
+                                    self.log("🗑️ Đã làm sạch các file trong thư mục temp/")
+                                except: pass
+
+                                
                             if cleaned_count > 0:
-                                self.log(f"🗑️ Đã dọn dẹp dự án (xóa {cleaned_count} file tạm), chỉ giữ lại Video, BGM và Sub.")
+                                self.log(f"🗑️ Đã dọn dẹp dự án (xóa {cleaned_count} mục tạm), chỉ giữ lại Video, BGM và Sub.")
+
                     # -------------------------
                 else:
                     # mod7 lỗi → chỉ warn, không dừng

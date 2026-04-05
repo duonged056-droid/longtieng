@@ -64,9 +64,30 @@ def extract_audio_segment(video_path: str, audio_path: str, start_sec: float, du
     subprocess.run(cmd, check=True)
 
 def save_wav(wav: np.ndarray, output_path: str, sample_rate: int = 44100):
-    """Lưu mảng numpy (float32) thành file WAV (int16)."""
-    wav_norm = wav * 32767
-    wavfile.write(output_path, sample_rate, wav_norm.astype(np.int16))
+    """Lưu mảng numpy (float32) thành file WAV dùng FFmpeg để hỗ trợ RF64 (>4GB)."""
+    # wav shape: [Samples, Channels] hoặc [Channels, Samples]
+    # Demucs output thường là [Samples, Channels] sau khi .T
+    if wav.ndim > 1:
+        channels = wav.shape[1]
+    else:
+        channels = 1
+    
+    # Chuẩn hóa về int16 để tiết kiệm dung lượng và tương thích cao
+    wav_norm = np.clip(wav * 32767, -32768, 32767).astype(np.int16)
+    
+    # Dùng FFmpeg để ghi file từ raw pcm_s16le
+    # FFmpeg sẽ tự động xử lý RF64 nếu file > 4GB
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "s16le", "-ar", str(sample_rate), "-ac", str(channels),
+        "-i", "pipe:0",
+        "-acodec", "pcm_s16le", 
+        output_path
+    ]
+    
+    process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    process.communicate(input=wav_norm.tobytes())
+
 
 def separate_single(separator, audio_path: str, vocal_out: str, bgm_out: str):
     """Tách 1 file audio → vocals + bgm."""

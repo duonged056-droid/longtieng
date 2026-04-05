@@ -100,6 +100,14 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
         '-t', '10', '-c:a', 'pcm_s16le', '-loglevel', 'error', silence_file
     ], capture_output=True)
     
+    def write_silence(file_obj, duration_ms):
+        duration_sec = duration_ms / 1000.0
+        while duration_sec > 0:
+            chunk = min(duration_sec, 10.0)
+            file_obj.write(f"file '{os.path.abspath(silence_file)}'\n")
+            file_obj.write(f"outpoint {chunk:.3f}\n")
+            duration_sec -= chunk
+
     with open(concat_list, "w", encoding="utf-8") as f:
         current_ms = 0
         for seg in new_segments:
@@ -110,8 +118,7 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
                 # Khoảng lặng trước segment
                 gap_ms = seg["new_start"] - current_ms
                 if gap_ms > 0:
-                    f.write(f"file '{os.path.abspath(silence_file)}'\n")
-                    f.write(f"outpoint {gap_ms / 1000.0:.3f}\n")
+                    write_silence(f, gap_ms)
                     current_ms += gap_ms
                 
                 if os.path.exists(wav_p):
@@ -119,15 +126,12 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
                     current_ms += seg["new_dur"]
                 else:
                     # Silence thay thế
-                    dur_sec = seg["new_dur"] / 1000.0
-                    f.write(f"file '{os.path.abspath(silence_file)}'\n")
-                    f.write(f"outpoint {dur_sec:.3f}\n")
+                    write_silence(f, seg["new_dur"])
                     current_ms += seg["new_dur"]
             elif seg["type"] == "gap":
                 gap_ms = seg["new_dur"]
                 if gap_ms > 0:
-                    f.write(f"file '{os.path.abspath(silence_file)}'\n")
-                    f.write(f"outpoint {gap_ms / 1000.0:.3f}\n")
+                    write_silence(f, gap_ms)
                     current_ms += gap_ms
     
     # Merge bằng FFmpeg concat
@@ -394,7 +398,7 @@ def main():
         filter_lines.append(f"[abgm_final]volume={args.bgm_vol}[b_vol];")
         filter_lines.append(f"[v_vol]asplit[v_vol1][v_vol2];")
         filter_lines.append(f"[b_vol]asplit[b_vol1][b_vol2];")
-        filter_lines.append(f"[v_vol1][b_vol1]amix=inputs=2:duration=first[outa]")
+        filter_lines.append(f"[v_vol1][b_vol1]amix=inputs=2:duration=longest[outa]")
             
         console.print(f"  > Render cum {c_idx+1}/{num_chunks} (Tối ưu Zero-Buffer: {len(chunk_segs)} video inputs)...")
         run_ffmpeg_chunk(
@@ -440,11 +444,15 @@ def main():
     # 7. Xuat SRT
     if os.path.exists(args.srt_vi_in):
         subs = pysrt.open(args.srt_vi_in, encoding='utf-8')
+        # TỐI ƯU ĐỒNG BỘ: Sắp xếp lại subs giống hệt Module 4 để tránh lệch chỉ số (index mismatch)
+        subs = sorted(subs, key=lambda s: s.start.ordinal)
+        
         new_subs = pysrt.SubRipFile()
         sub_map = {s["index"]: s for s in new_segments if s["type"] == "sub"}
         
-        console.print(f"--- Dang xuat file phu de CapCut ---")
+        console.print(f"--- Dang xuat file phu de CapCut ({len(subs)} cau) ---")
         
+        missing_count = 0
         for i, sub in enumerate(subs):
             if i in sub_map:
                 s_info = sub_map[i]
@@ -456,13 +464,28 @@ def main():
                     end=pysrt.SubRipTime(milliseconds=s_info["new_start"] + s_info["new_dur"]),
                     text=sub.text
                 ))
-                
+            else:
+                missing_count += 1
+        
+        if missing_count > 0:
+            console.print(f"[bold red]CẢNH BÁO:[/bold red] Có {missing_count} câu bị thiếu trong quá trình ghép nối!")
+            
         new_subs.save(args.srt_out, encoding='utf-8')
+
 
     # Cleanup
     console.print("--- Dang don dep ---")
-    # TỐI ƯU: Xóa chunks ngay
     shutil.rmtree("chunks", ignore_errors=True)
+    
+    # BỔ SUNG: Xóa sạch file trong temp/ nhưng giữ lại folder theo yêu cầu
+    if os.path.exists("temp"):
+        for f in os.listdir("temp"):
+            f_path = os.path.join("temp", f)
+            try:
+                if os.path.isfile(f_path):
+                    os.remove(f_path)
+            except: pass
+
     if os.path.exists(concat_list_path): os.remove(concat_list_path)
     if os.path.exists(vocal_merged): os.remove(vocal_merged)
     
