@@ -178,7 +178,7 @@ def main():
     if args.speaker_mapping:
         mapping = json.loads(args.speaker_mapping)
     
-    subs = pysrt.open(args.srt_vi_in, encoding='utf-8')
+    subs = pysrt.open(args.srt_vi_in, encoding='utf-8-sig')
     subs = sorted(subs, key=lambda s: s.start.ordinal)
     os.makedirs("temp", exist_ok=True)
     
@@ -324,7 +324,7 @@ def main():
 
     subprocess.run([
         ffmpeg_cmd, '-y', '-f', 'concat', '-safe', '0', 
-        '-i', concat_list_path, '-c', 'copy', args.tts_out
+        '-i', concat_list_path, '-c:a', 'pcm_s16le', args.tts_out
     ], capture_output=True)
     
     timing_path = os.path.join(os.path.dirname(args.tts_out), "tts_timing.json")

@@ -425,11 +425,8 @@ def main():
         for cf in chunk_files:
             f.write(f"file '{cf}'\n")
             
-    cmd_final = [ffmpeg_cmd, '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', concat_list_path]
-    if has_bgm:
-        cmd_final += ['-c', 'copy', '-map', '0:v', '-map', '0:a', args.video_out]
-    else:
-        cmd_final += ['-c', 'copy', '-map', '0:v', args.video_out]
+    # LUÔN LUÔN map cả hình và tiếng vì hệ thống filter đã luôn tạo ra 3 luồng âm thanh
+    cmd_final = [ffmpeg_cmd, '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', concat_list_path, '-c', 'copy', '-map', '0:v', '-map', '0:a', args.video_out]
         
     try:
         subprocess.run(cmd_final, check=True)
@@ -455,7 +452,7 @@ def main():
 
     # 7. Xuat SRT
     if os.path.exists(args.srt_vi_in):
-        subs = pysrt.open(args.srt_vi_in, encoding='utf-8')
+        subs = pysrt.open(args.srt_vi_in, encoding='utf-8-sig')
         # TỐI ƯU ĐỒNG BỘ: Sắp xếp lại subs giống hệt Module 4 để tránh lệch chỉ số (index mismatch)
         subs = sorted(subs, key=lambda s: s.start.ordinal)
         

@@ -126,9 +126,14 @@ class BumYTCloneExactApp(ctk.CTk):
         elif level == "error": prefix = "❌ "
         
         formatted_text = f"{prefix}{text}\n"
-        self.log_view.insert("end", formatted_text)
-        self.log_view.see("end")
-        self.update_idletasks()
+
+        # Ép tác vụ UI về luồng chính để chống Crash App
+        def _update_ui():
+            self.log_view.insert("end", formatted_text)
+            self.log_view.see("end")
+            self.update_idletasks()
+
+        self.after(0, _update_ui)
         print(text)
 
     def _build_left_panel(self):
@@ -688,30 +693,20 @@ class BumYTCloneExactApp(ctk.CTk):
         ]
         
         def on_blur_done():
-            self.log(f"✅ LÀM MỜ XONG! File lưu tại: {video_out}", "success")
-            if messagebox.askyesno("Thành công", f"Đã làm mờ xong.\nBạn có muốn dùng video đã làm mờ này để làm bước lồng tiếng tiếp theo không?"):
-                self.video_path = video_out
-                # Update UI elements
-                self.entry_video_t3.delete(0, tk.END)
-                self.entry_video_t3.insert(0, video_out)
-                self.cap = cv2.VideoCapture(video_out)
-                self._update_roi_frame(0)
+            # Cũng gom Messagebox vào luồng chính để tránh crash macOS/Windows
+            def _gui_action():
+                if messagebox.askyesno("Thành công", f"Đã làm mờ xong.\nBạn có muốn dùng video này làm lồng tiếng không?"):
+                    self.video_path = video_out
+                    self.entry_video_t3.delete(0, tk.END)
+                    self.entry_video_t3.insert(0, video_out)
+                    self.cap = cv2.VideoCapture(video_out)
+                    self._update_roi_frame(0)
+            self.after(0, _gui_action)
 
-        threading.Thread(target=self._run_cmds, args=([cmd], "LÀM MỜ HOÀN TẤT!", on_blur_done)).start()
+        threading.Thread(target=self._run_cmds, args=([cmd], "LÀM MỜ HOÀN TẤT!", None, None, on_blur_done)).start()
 
-    def test_voice(self):
-        text = self.test_text.get()
-        if not text: text = "Chào mừng bạn đến với BumYT Pro 2026."
-        self.log(f"Đang Test giọng đọc: {text}")
-        
-        async def do_test():
-            communicate = edge_tts.Communicate(text, "vi-VN-HoaiMyNeural")
-            await communicate.save("test_voice.mp3")
-            os.startfile("test_voice.mp3")
-            
-        asyncio.run(do_test())
 
-    def _run_cmds(self, cmds, success_msg, final_temp=None, final_target=None):
+    def _run_cmds(self, cmds, success_msg, final_temp=None, final_target=None, callback=None):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
@@ -820,6 +815,8 @@ class BumYTCloneExactApp(ctk.CTk):
                 self.log(f"⚠️ Lỗi khi đổi tên file kết quả: {e}", level="warning")
 
         self.log(success_msg, level="success")
+        if callback:
+            callback()
 
 def route_cli():
     if getattr(sys, 'frozen', False) and len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
