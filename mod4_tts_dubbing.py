@@ -109,9 +109,11 @@ async def edge_tts_batch(tasks_list):
         # Chấp nhận bỏ qua nếu hỏng cả 3 lần để không bị treo vĩnh viễn
         return False
 
-    # BÍ QUYẾT XỬ LÝ SIÊU VIDEO: Cắt thành từng cụm 50 câu
     chunk_size = 50
+    total_chunks = (len(tasks_list) + chunk_size - 1) // chunk_size
     for i in range(0, len(tasks_list), chunk_size):
+        chunk_idx = i // chunk_size + 1
+        console.print(f" [dim]Edge TTS Chunk: {chunk_idx}/{total_chunks}...[/dim]")
         chunk = tasks_list[i:i+chunk_size]
         coros = [_single(t, v, o) for t, v, o in chunk]
         res = await asyncio.gather(*coros)
@@ -249,8 +251,9 @@ def main():
                     fallback_voice = "vi-VN-NamMinhNeural|+0%|+0Hz" if t["voice"] == "vi_vn_001" else "vi-VN-HoaiMyNeural|+0%|+0Hz"
                     fallback_tasks.append((t["content"], fallback_voice, t["raw_path"], t["idx"]))
                 
-                if i % 20 == 0 or i == len(tiktok_queue):
-                    console.print(f" [dim]TikTok Progress: {i}/{len(tiktok_queue)}[/dim]")
+                if i % 10 == 0 or i == len(tiktok_queue):
+                    snippet = t["content"][:30] + "..." if len(t["content"]) > 30 else t["content"]
+                    console.print(f" [dim]TikTok Progress: {i}/{len(tiktok_queue)} - {snippet}[/dim]")
 
     # Edge & Fallback Generation (Batch)
     edge_batch_inputs = [(t["content"], t["voice"], t["raw_path"]) for t in edge_queue]
@@ -299,8 +302,9 @@ def main():
             else:
                 align_results.append((i, sub.start.ordinal, None, sub.end.ordinal - sub.start.ordinal))
             
-            if (i + 1) % 50 == 0 or i == len(subs) - 1:
-                console.print(f" [dim]Align Progress: {i+1}/{len(subs)}[/dim]")
+            if (i + 1) % 10 == 0 or i == len(subs) - 1:
+                snippet = subs[i].text[:30] + "..." if len(subs[i].text) > 30 else subs[i].text
+                console.print(f" [dim]Align Progress: {i+1}/{len(subs)} - {snippet}[/dim]")
 
     # --- PHASE 3: FINALIZE WITH FFmpeg CONCAT ---
     console.print("[cyan]Dang ket xuat am thanh cuoi cung (FFmpeg Concat)...[/cyan]")

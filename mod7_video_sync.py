@@ -432,7 +432,8 @@ def main():
         # Trộn mix, thêm normalize=0 để không bị bóp nghẹt tiếng
         filter_lines.append(f"[v_vol1][b_vol1]amix=inputs=2:duration=longest:normalize=0[outa]")
             
-        console.print(f"  > Render cum {c_idx+1}/{num_chunks} (Tối ưu Zero-Buffer: {len(chunk_segs)} video inputs)...")
+        chunk_time_str = time.strftime('%H:%M:%S', time.gmtime(chunk_min_start))
+        console.print(f"  > Render cum {c_idx+1}/{num_chunks} (TĐ: {chunk_time_str}) - {len(chunk_segs)} cau thoai...")
         run_ffmpeg_chunk(
             ffmpeg_cmd, cmd_inputs, "\n".join(filter_lines),
             chunk_ts, use_gpu, has_cuda_dec, fps

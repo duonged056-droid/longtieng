@@ -785,20 +785,33 @@ class BumYTCloneExactApp(ctk.CTk):
             video_final_hardsub = os.path.join(self.out_dir, "video_FINAL_HARDSUB.mp4")
             style_name = self.opt_sub_style.get()
             
-            # Lấy thông số cấu hình từ UI
-            margin_v = int(self.slider_sub_y.get())
-            f_size = int(self.slider_font_size.get())
-            out_th = int(self.slider_outline.get())
-            shad_th = int(self.slider_shadow.get())
+            # Lấy thông số từ UI
+            ui_y = self.slider_sub_y.get()
+            ui_size = self.slider_font_size.get()
+            ui_outline = self.slider_outline.get()
+            ui_shadow = self.slider_shadow.get()
+
+            # --- LOGIC CĂN CHỈNH TỶ LỆ ---
+            # Để khớp với khung Preview của App:
+            # Chữ: 1 đơn vị trên UI ~ 1.6 pixel trên video Full HD
+            # Lề: 1 đơn vị trên UI ~ 1.2 pixel trên video Full HD
+            f_size = int(ui_size * 1.6)
+            margin_v = int(ui_y * 1.2)
+            out_th = int(ui_outline * 1.0)
+            shad_th = int(ui_shadow * 1.0)
             
-            # Tạo chuỗi Style cho Subtitles Filter (ASS Format)
-            ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline={out_th},Shadow={shad_th},MarginV={margin_v}"
+            # Khóa cứng Alignment=2 (Căn giữa đáy) để tọa độ Y không bị chạy lung tung
+            base_style = f"Fontname=Arial,Fontsize={f_size},Alignment=2,MarginV={margin_v},Outline={out_th},Shadow={shad_th}"
+            
+            # Định dạng màu BGR chuẩn cho FFmpeg (Màu vàng: &H00FFFF&)
             if "Vàng" in style_name: 
-                ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,Outline={out_th},Shadow={shad_th},MarginV={margin_v}"
+                ass_style = f"{base_style},PrimaryColour=&H00FFFF&,OutlineColour=&H000000&"
             elif "hộp mờ" in style_name: 
-                ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H00FFFFFF,BackColour=&H80000000,BorderStyle=3,Outline=0,Shadow=0,MarginV={margin_v}"
+                ass_style = f"{base_style},PrimaryColour=&HFFFFFF&,BackColour=&H80000000,BorderStyle=3,Outline=0,Shadow=0"
             elif "Neon" in style_name: 
-                ass_style = f"Fontname=Arial,Fontsize={f_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H00FF00FF,Outline={out_th},Shadow={shad_th},MarginV={margin_v}"
+                ass_style = f"{base_style},PrimaryColour=&HFFFFFF&,OutlineColour=&HFF00FF&"
+            else:
+                ass_style = f"{base_style},PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&"
             
             # QUAN TRỌNG: Lấy file srt_synced (Sub đã được làm chậm khớp nhip)
             # Ép kiểu đường dẫn cho hệ điều hành Windows tránh lỗi dấu hai chấm ổ đĩa
