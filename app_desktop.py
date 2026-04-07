@@ -507,9 +507,11 @@ class BumYTCloneExactApp(ctk.CTk):
         if hasattr(self, 'chk_hardsub') and self.chk_hardsub.get():
             try:
                 draw = ImageDraw.Draw(img_resized)
-                f_size = int(self.slider_font_size.get() * self.scale_f * 1.5)
-                out_th = int(self.slider_outline.get() * self.scale_f)
-                shad_th = int(self.slider_shadow.get() * self.scale_f)
+                # CHUẨN HÓA: f_size trên preview phải nhân với scale_f để khớp với màn hình 1080p
+                # Multiplier 1.8 giúp cỡ 22-25 trông tự nhiên trên Full HD
+                f_size = int(self.slider_font_size.get() * self.scale_f * 1.8)
+                out_th = int(self.slider_outline.get() * self.scale_f * 1.2)
+                shad_th = int(self.slider_shadow.get() * self.scale_f * 1.2)
                 
                 try:
                     font = ImageFont.truetype("arialbd.ttf", f_size)
@@ -518,7 +520,8 @@ class BumYTCloneExactApp(ctk.CTk):
 
                 sample_text = "YTDUONG - Test Sub CapCut"
                 style = self.opt_sub_style.get()
-                margin_v = int(self.slider_sub_y.get() * self.scale_f * 2)
+                # MarginV tương ứng: ui_y * 2.0 để dễ căn chỉnh trên preview
+                margin_v = int(self.slider_sub_y.get() * self.scale_f * 2.0)
                 
                 # Tính toán tọa độ để chữ nằm giữa
                 bbox = draw.textbbox((0, 0), sample_text, font=font)
@@ -791,17 +794,15 @@ class BumYTCloneExactApp(ctk.CTk):
             ui_outline = self.slider_outline.get()
             ui_shadow = self.slider_shadow.get()
 
-            # --- LOGIC CĂN CHỈNH TỶ LỆ ---
-            # Để khớp với khung Preview của App:
-            # Chữ: 1 đơn vị trên UI ~ 1.6 pixel trên video Full HD
-            # Lề: 1 đơn vị trên UI ~ 1.2 pixel trên video Full HD
-            f_size = int(ui_size * 1.6)
-            margin_v = int(ui_y * 1.2)
-            out_th = int(ui_outline * 1.0)
-            shad_th = int(ui_shadow * 1.0)
+            # --- LOGIC CĂN CHỈNH TỶ LỆ CHUẨN 1080P ---
+            # Sử dụng PlayResY=1080 để cố định tọa độ, giúp cỡ chữ khớp 100% video
+            f_size = int(ui_size * 1.8)
+            margin_v = int(ui_y * 2.0)
+            out_th = int(ui_outline * 1.2)
+            shad_th = int(ui_shadow * 1.2)
             
-            # Khóa cứng Alignment=2 (Căn giữa đáy) để tọa độ Y không bị chạy lung tung
-            base_style = f"Fontname=Arial,Fontsize={f_size},Alignment=2,MarginV={margin_v},Outline={out_th},Shadow={shad_th}"
+            # QUAN TRỌNG: Thêm PlayResY=1080 để FFmpeg hiểu tỷ lệ màn hình là Full HD
+            base_style = f"Fontname=Arial,Fontsize={f_size},Alignment=2,MarginV={margin_v},Outline={out_th},Shadow={shad_th},PlayResY=1080"
             
             # Định dạng màu BGR chuẩn cho FFmpeg (Màu vàng: &H00FFFF&)
             if "Vàng" in style_name: 
@@ -813,16 +814,30 @@ class BumYTCloneExactApp(ctk.CTk):
             else:
                 ass_style = f"{base_style},PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&"
             
-            # QUAN TRỌNG: Lấy file srt_synced (Sub đã được làm chậm khớp nhip)
-            # Ép kiểu đường dẫn cho hệ điều hành Windows tránh lỗi dấu hai chấm ổ đĩa
-            srt_escaped = srt_synced.replace('\\', '/').replace(':', '\\\\:')
+            # --- VÁ LỖI TƯƠNG THÍCH VÀ ĐƯỜNG DẪN ---
+            # Sử dụng đường dẫn tương đối để chống FFmpeg báo lỗi dấu hai chấm trên Windows
+            try:
+                srt_rel = os.path.relpath(srt_synced).replace('\\', '/')
+                srt_escaped = srt_rel.replace(':', '\\:')
+            except:
+                srt_escaped = srt_synced.replace('\\', '/').replace(':', '\\\\:')
             
-            # Đã chuyển sang GPU NVIDIA (h264_nvenc) để render siêu tốc độ
+            # Tự động kiểm tra Card đồ họa để chọn Encoder phù hợp (Chống Crash)
+            try:
+                test_v = subprocess.run([ffmpeg_bin, '-encoders'], capture_output=True, text=True)
+                has_nvenc = 'h264_nvenc' in test_v.stdout
+            except:
+                has_nvenc = False
+            
+            v_encoder = 'h264_nvenc' if has_nvenc else 'libx264'
+            v_preset = 'p4' if has_nvenc else 'fast'
+            # --------------------------------------
+
             cmd_hardsub = [
                 ffmpeg_bin, '-y', 
                 '-hwaccel', 'auto', '-i', video_synced,
                 '-vf', f"subtitles='{srt_escaped}':force_style='{ass_style}'",
-                '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '26', '-c:a', 'copy', video_final_hardsub
+                '-c:v', v_encoder, '-preset', v_preset, '-cq', '26', '-c:a', 'copy', video_final_hardsub
             ]
             tasks.append(cmd_hardsub)
             

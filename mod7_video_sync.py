@@ -123,11 +123,24 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
                 
                 if os.path.exists(wav_p):
                     f.write(f"file '{os.path.abspath(wav_p)}'\n")
-                    # BỔ SUNG: Ép FFmpeg cắt chính xác để chống lệch timeline
-                    f.write(f"outpoint {seg['new_dur'] / 1000.0:.3f}\n")
+                    
+                    # --- VÁ LỖI MẤT GIỌNG ĐUÔI VIDEO ---
+                    # Lấy độ dài thực của file TTS (tts_dur) và so sánh với thời lượng video được cấp (new_dur)
+                    tts_dur_sec = seg.get("tts_dur", seg["new_dur"]) / 1000.0
+                    target_dur_sec = seg["new_dur"] / 1000.0
+                    
+                    actual_take_sec = min(tts_dur_sec, target_dur_sec)
+                    f.write(f"outpoint {actual_take_sec:.3f}\n")
+                    
+                    # Nếu file TTS ngắn hơn, bắt buộc phải nhét thêm khoảng lặng (Silence) để bù thời gian
+                    shortfall_ms = seg["new_dur"] - int(actual_take_sec * 1000)
+                    if shortfall_ms > 0:
+                        write_silence(f, shortfall_ms)
+                    # -----------------------------------
+                    
                     current_ms += seg["new_dur"]
                 else:
-                    # Silence thay thế
+                    # Silence hoàn toàn
                     write_silence(f, seg["new_dur"])
                     current_ms += seg["new_dur"]
             elif seg["type"] == "gap":
@@ -189,8 +202,11 @@ def run_ffmpeg_chunk(ffmpeg_cmd, cmd_inputs, filter_content, output_ts, use_gpu,
     cmd += ['-filter_complex_script', filter_path]
     cmd += ['-map', '[outv]', '-map', '[outa]', '-map', '[v_vol2]', '-map', '[b_vol2]']
         
-    cmd += ['-c:v', encoder, '-preset', preset, '-r', f'{fps:.2f}']
-    cmd += ['-c:a', 'aac', '-b:a', '128k'] 
+    # KHÓA CỨNG FPS: Luôn dùng 30.00 để tránh sai số tích tụ trên video dài
+    target_fps = 30.0
+    
+    cmd += ['-c:v', encoder, '-preset', preset, '-r', f'{target_fps:.2f}', '-vsync', 'cfr']
+    cmd += ['-c:a', 'aac', '-b:a', '128k', '-ar', '44100'] 
     cmd += ['-f', 'mpegts', output_ts]
     
     try:
@@ -233,10 +249,14 @@ def main():
         console.print("[bold yellow]⚡ GPU Encode Only (NVENC)[/bold yellow]")
 
     # 1. Thong tin Video
-    video_dur_ms, fps = get_video_info(ffprobe_cmd, args.video_in)
+    video_dur_ms, orig_fps = get_video_info(ffprobe_cmd, args.video_in)
     if video_dur_ms <= 0:
         console.print("  Loi doc video!")
         return
+        
+    # LUÔN KHÓA 30 FPS để đạt độ ổn định cao nhất cho video dài
+    fps = 30.0
+    console.print(f"  [cyan]Chuẩn hóa FPS: {orig_fps:.2f} -> {fps:.2f} (Fixed CFR)[/cyan]")
 
     # 2. Doc va lam sach timing
     timing_data = []
@@ -262,32 +282,35 @@ def main():
         # Khoảng trống (Gap) trước câu này
         if orig_start > prev_orig_end_ms:
             orig_gap_dur = orig_start - prev_orig_end_ms
-            
-            # Tính toán thời gian bị dôi ra từ các câu trước
             time_drift = current_new_time_ms - prev_orig_end_ms
-            
-            # Ăn bớt khoảng trống để bù trừ độ trễ (nhưng không được nhỏ hơn 0)
             new_gap_dur = max(0, orig_gap_dur - time_drift)
             
             if new_gap_dur > 0:
-                new_segments.append({
-                    "type": "gap", "start": prev_orig_end_ms, "end": prev_orig_end_ms + orig_gap_dur,
-                    "dur": orig_gap_dur, "new_dur": new_gap_dur, "new_start": current_new_time_ms
-                })
-                current_new_time_ms += new_gap_dur
+                # LÀM TRÒN FRAME: Đảm bảo gap luôn kết thúc tại ranh giới khung hình
+                frame_gap = round(new_gap_dur * fps / 1000.0)
+                exact_new_gap_dur = int(frame_gap * 1000.0 / fps)
+                
+                if exact_new_gap_dur > 0:
+                    new_segments.append({
+                        "type": "gap", "start": prev_orig_end_ms, "end": prev_orig_end_ms + orig_gap_dur,
+                        "dur": orig_gap_dur, "new_dur": exact_new_gap_dur, "new_start": current_new_time_ms
+                    })
+                    current_new_time_ms += exact_new_gap_dur
 
         # Xử lý đoạn có thoại
-        # Nếu câu trước giãn ra xâm lấn vào câu này, đẩy thời gian bắt đầu lên
         actual_start_time = max(current_new_time_ms, orig_start) 
-        
-        # Giới hạn mức độ kéo giãn tối đa là 1.5x để video không bị nhão
         target_dur = min(max(orig_dur, tts_dur), int(orig_dur * 1.5))
+        
+        # LÀM TRÒN FRAME: Đảm bảo segment lồng tiếng khớp khít với lưới khung hình
+        frame_dur = round(target_dur * fps / 1000.0)
+        exact_target_dur = int(frame_dur * 1000.0 / fps)
         
         new_segments.append({
             "type": "sub", "index": item["index"], "start": orig_start, "end": orig_end,
-            "dur": orig_dur, "new_dur": target_dur, "new_start": actual_start_time
+            "dur": orig_dur, "new_dur": exact_target_dur, "new_start": actual_start_time,
+            "tts_dur": tts_dur  # <--- BẮT BUỘC THÊM DÒNG NÀY ĐỂ FIX LỆCH TIẾNG
         })
-        current_new_time_ms = actual_start_time + target_dur
+        current_new_time_ms = actual_start_time + exact_target_dur
         prev_orig_end_ms = orig_end
 
     # Xử lý đoạn đuôi video
@@ -473,21 +496,25 @@ def main():
 
     # 7. Xuat SRT
     if os.path.exists(args.srt_vi_in):
-        subs = pysrt.open(args.srt_vi_in, encoding='utf-8-sig')
+        raw_subs = pysrt.open(args.srt_vi_in, encoding='utf-8-sig')
         # TỐI ƯU ĐỒNG BỘ: Sắp xếp lại subs giống hệt Module 4 để tránh lệch chỉ số (index mismatch)
-        subs = sorted(subs, key=lambda s: s.start.ordinal)
+        raw_subs = sorted(raw_subs, key=lambda s: s.start.ordinal)
+        
+        # --- VÁ LỖI LỆCH CHỮ TỪ ĐÂY ---
+        # Bắt buộc phải lọc bỏ sub rác (giống Mod 4) thì Index mới khớp với timing.json!
+        valid_subs = [s for s in raw_subs if s.text.strip() and (s.end.ordinal - s.start.ordinal) > 0]
         
         new_subs = pysrt.SubRipFile()
         sub_map = {s["index"]: s for s in new_segments if s["type"] == "sub"}
         
-        console.print(f"--- Dang xuat file phu de CapCut ({len(subs)} cau) ---")
+        console.print(f"--- Dang xuat file phu de CapCut ({len(valid_subs)} cau hop le) ---")
         
         missing_count = 0
-        for i, sub in enumerate(subs):
+        for i, sub in enumerate(valid_subs):
             if i in sub_map:
                 s_info = sub_map[i]
                 
-                # Update SRT
+                # Update SRT dựa trên New Start và New Dur (Đã khớp frame rate)
                 new_subs.append(pysrt.SubRipItem(
                     index=i+1,
                     start=pysrt.SubRipTime(milliseconds=s_info["new_start"]),
