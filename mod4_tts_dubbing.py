@@ -319,12 +319,20 @@ def main():
     concat_list_path = "temp/concat_list.txt"
     current_timeline_ms = 0
 
+    # Thêm hàm nhỏ này để cắt khoảng lặng an toàn
+    def write_silence_mod4(file_obj, duration_ms):
+        duration_sec = duration_ms / 1000.0
+        while duration_sec > 0:
+            chunk = min(duration_sec, 60.0) # Không bao giờ cắt quá 60s một lần
+            file_obj.write(f"file 'silence_60s.wav'\n")
+            file_obj.write(f"outpoint {chunk:.3f}\n")
+            duration_sec -= chunk
+
     with open(concat_list_path, "w", encoding="utf-8") as f:
         for idx, pos_ms, aligned_path, duration_ms in sorted(align_results, key=lambda x: x[0]):
             gap_ms = pos_ms - current_timeline_ms
             if gap_ms > 0:
-                f.write(f"file 'silence_60s.wav'\n")
-                f.write(f"outpoint {gap_ms / 1000.0:.3f}\n")
+                write_silence_mod4(f, gap_ms) # <--- Sửa ở đây
                 current_timeline_ms += gap_ms
             
             if aligned_path and os.path.exists(aligned_path):
@@ -334,8 +342,7 @@ def main():
                 current_timeline_ms += duration_ms
             else:
                 dur_sec = (subs[idx].end.ordinal - subs[idx].start.ordinal) / 1000.0
-                f.write(f"file 'silence_60s.wav'\n")
-                f.write(f"outpoint {dur_sec:.3f}\n")
+                write_silence_mod4(f, int(dur_sec * 1000)) # <--- Sửa ở đây
                 current_timeline_ms += int(dur_sec * 1000)
 
             timing_data.append({
@@ -346,8 +353,7 @@ def main():
                 "tts_duration_ms": duration_ms
             })
 
-        f.write(f"file 'silence_60s.wav'\n")
-        f.write(f"outpoint 3.0\n")
+        write_silence_mod4(f, 3000) # Cuối video cho nghỉ 3 giây
 
     subprocess.run([
         ffmpeg_cmd, '-y', '-f', 'concat', '-safe', '0', 

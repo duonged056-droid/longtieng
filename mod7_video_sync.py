@@ -124,19 +124,18 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
                 if os.path.exists(wav_p):
                     f.write(f"file '{os.path.abspath(wav_p)}'\n")
                     
-                    # --- VÁ LỖI MẤT GIỌNG ĐUÔI VIDEO ---
-                    # Lấy độ dài thực của file TTS (tts_dur) và so sánh với thời lượng video được cấp (new_dur)
+                    # --- ĐÂY LÀ ĐOẠN FIX LỖI MẤT 13 PHÚT CUỐI MÀ MÀY QUÊN CHƯA THÊM ---
                     tts_dur_sec = seg.get("tts_dur", seg["new_dur"]) / 1000.0
                     target_dur_sec = seg["new_dur"] / 1000.0
                     
                     actual_take_sec = min(tts_dur_sec, target_dur_sec)
                     f.write(f"outpoint {actual_take_sec:.3f}\n")
                     
-                    # Nếu file TTS ngắn hơn, bắt buộc phải nhét thêm khoảng lặng (Silence) để bù thời gian
+                    # Bù phần thời gian thiếu hụt bằng khoảng lặng để timeline không bị dồn về trước
                     shortfall_ms = seg["new_dur"] - int(actual_take_sec * 1000)
                     if shortfall_ms > 0:
                         write_silence(f, shortfall_ms)
-                    # -----------------------------------
+                    # ------------------------------------------------------------------
                     
                     current_ms += seg["new_dur"]
                 else:
@@ -299,18 +298,15 @@ def main():
 
         # Xử lý đoạn có thoại
         actual_start_time = max(current_new_time_ms, orig_start) 
+        # Giới hạn mức độ kéo giãn tối đa là 1.5x để video không bị nhão
         target_dur = min(max(orig_dur, tts_dur), int(orig_dur * 1.5))
-        
-        # LÀM TRÒN FRAME: Đảm bảo segment lồng tiếng khớp khít với lưới khung hình
-        frame_dur = round(target_dur * fps / 1000.0)
-        exact_target_dur = int(frame_dur * 1000.0 / fps)
         
         new_segments.append({
             "type": "sub", "index": item["index"], "start": orig_start, "end": orig_end,
-            "dur": orig_dur, "new_dur": exact_target_dur, "new_start": actual_start_time,
-            "tts_dur": tts_dur  # <--- BẮT BUỘC THÊM DÒNG NÀY ĐỂ FIX LỆCH TIẾNG
+            "dur": orig_dur, "new_dur": target_dur, "new_start": actual_start_time,
+            "tts_dur": tts_dur  # <--- BẮT BUỘC PHẢI THÊM DÒNG NÀY ĐỂ LƯU THỜI GIAN THỰC CỦA GIỌNG AI
         })
-        current_new_time_ms = actual_start_time + exact_target_dur
+        current_new_time_ms = actual_start_time + target_dur
         prev_orig_end_ms = orig_end
 
     # Xử lý đoạn đuôi video
