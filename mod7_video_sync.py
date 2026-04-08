@@ -104,7 +104,7 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
         duration_sec = duration_ms / 1000.0
         while duration_sec > 0:
             chunk = min(duration_sec, 10.0)
-            file_obj.write(f"file '{os.path.abspath(silence_file)}'\n")
+            file_obj.write(f"file '{os.path.abspath(silence_file).replace(os.sep, '/')}'\n")
             file_obj.write(f"outpoint {chunk:.3f}\n")
             duration_sec -= chunk
 
@@ -122,7 +122,7 @@ def pre_merge_vocals(aligned_dir, timing_data, new_segments, output_wav, ffmpeg_
                     current_ms += gap_ms
                 
                 if os.path.exists(wav_p):
-                    f.write(f"file '{os.path.abspath(wav_p)}'\n")
+                    f.write(f"file '{os.path.abspath(wav_p).replace(os.sep, '/')}'\n")
                     
                     # --- ĐÂY LÀ ĐOẠN FIX LỖI MẤT 13 PHÚT CUỐI MÀ MÀY QUÊN CHƯA THÊM ---
                     tts_dur_sec = seg.get("tts_dur", seg["new_dur"]) / 1000.0
@@ -267,59 +267,70 @@ def main():
         console.print(f"  Canh bao: Khong tim thay {args.timing_json}.")
         return
 
-    # 3. Tinh toan Timeline Shifting (TỐI ƯU CHỐNG GIÃN NỞ VIDEO)
+    # 3. Tinh toan Timeline Shifting (KHÓA FRAME - CHỐNG LỆCH HÌNH VÀ TIẾNG)
     new_segments = []
-    current_new_time_ms = 0
+    current_new_frame = 0
     prev_orig_end_ms = 0
-
+    fps = 30.0 # Bắt buộc cố định 30fps để chia frame chuẩn xác
+    
     for i, item in enumerate(timing_data):
         orig_start = item["sub_start_ms"]
         orig_end = item["sub_end_ms"]
         tts_dur = item["tts_duration_ms"]
         orig_dur = item["sub_duration_ms"]
 
-        # Khoảng trống (Gap) trước câu này
-        if orig_start > prev_orig_end_ms:
-            orig_gap_dur = orig_start - prev_orig_end_ms
-            time_drift = current_new_time_ms - prev_orig_end_ms
-            new_gap_dur = max(0, orig_gap_dur - time_drift)
+        # Đồng bộ Start Frame tránh sai số phẩy động
+        target_start_ms = max(current_new_frame * 1000.0 / fps, orig_start)
+        start_frame = round(target_start_ms * fps / 1000.0)
+        
+        # Xử lý khoảng trống (Gap)
+        if start_frame > current_new_frame:
+            gap_frames = start_frame - current_new_frame
+            exact_gap_ms = int(gap_frames * 1000.0 / fps)
             
-            if new_gap_dur > 0:
-                # LÀM TRÒN FRAME: Đảm bảo gap luôn kết thúc tại ranh giới khung hình
-                frame_gap = round(new_gap_dur * fps / 1000.0)
-                exact_new_gap_dur = int(frame_gap * 1000.0 / fps)
-                
-                if exact_new_gap_dur > 0:
-                    new_segments.append({
-                        "type": "gap", "start": prev_orig_end_ms, "end": prev_orig_end_ms + orig_gap_dur,
-                        "dur": orig_gap_dur, "new_dur": exact_new_gap_dur, "new_start": current_new_time_ms
-                    })
-                    current_new_time_ms += exact_new_gap_dur
+            if exact_gap_ms > 0:
+                new_segments.append({
+                    "type": "gap", "start": prev_orig_end_ms, "end": orig_start,
+                    "dur": max(0, orig_start - prev_orig_end_ms), "new_dur": exact_gap_ms, 
+                    "new_start": int(current_new_frame * 1000.0 / fps),
+                    "new_frames": gap_frames
+                })
+                current_new_frame += start_frame - current_new_frame
 
-        # Xử lý đoạn có thoại
-        actual_start_time = max(current_new_time_ms, orig_start) 
-        # Giới hạn mức độ kéo giãn tối đa là 1.5x để video không bị nhão
-        target_dur = min(max(orig_dur, tts_dur), int(orig_dur * 1.5))
+        # Xử lý thoại (Sub)
+        raw_target_dur = min(max(orig_dur, tts_dur), int(orig_dur * 1.5))
+        sub_frames = round(raw_target_dur * fps / 1000.0)
+        if sub_frames < 1: sub_frames = 1 # Chống lỗi chia 0
+        
+        exact_sub_dur_ms = int(sub_frames * 1000.0 / fps)
         
         new_segments.append({
             "type": "sub", "index": item["index"], "start": orig_start, "end": orig_end,
-            "dur": orig_dur, "new_dur": target_dur, "new_start": actual_start_time,
-            "tts_dur": tts_dur  # <--- BẮT BUỘC PHẢI THÊM DÒNG NÀY ĐỂ LƯU THỜI GIAN THỰC CỦA GIỌNG AI
+            "dur": orig_dur, "new_dur": exact_sub_dur_ms, 
+            "new_start": int(current_new_frame * 1000.0 / fps),
+            "tts_dur": tts_dur,
+            "new_frames": sub_frames
         })
-        current_new_time_ms = actual_start_time + target_dur
+        current_new_frame += sub_frames
         prev_orig_end_ms = orig_end
 
     # Xử lý đoạn đuôi video
     if prev_orig_end_ms < video_dur_ms:
         gap_dur = video_dur_ms - prev_orig_end_ms
-        time_drift = current_new_time_ms - prev_orig_end_ms
+        time_drift = (current_new_frame * 1000.0 / fps) - prev_orig_end_ms
         new_gap_dur = max(0, gap_dur - time_drift)
         
         if new_gap_dur > 0:
-            new_segments.append({
-                "type": "gap", "start": prev_orig_end_ms, "end": video_dur_ms,
-                "dur": gap_dur, "new_dur": new_gap_dur, "new_start": current_new_time_ms
-            })
+            gap_frames = round(new_gap_dur * fps / 1000.0)
+            exact_gap_ms = int(gap_frames * 1000.0 / fps)
+            if exact_gap_ms > 0:
+                new_segments.append({
+                    "type": "gap", "start": prev_orig_end_ms, "end": video_dur_ms,
+                    "dur": gap_dur, "new_dur": exact_gap_ms, 
+                    "new_start": int(current_new_frame * 1000.0 / fps),
+                    "new_frames": gap_frames
+                })
+                current_new_frame += gap_frames
 
     # TỐI ƯU: Pre-merge vocals thành 1 file
     console.print("[cyan]--- Pre-merge vocals thành 1 file (Tiết kiệm RAM) ---[/cyan]")
@@ -355,29 +366,26 @@ def main():
         filter_lines = []
         cv_in = ""
         ca_bgm_in = ""
-        ca_voc_in = ""
         
         chunk_min_start = min(seg["start"] for seg in chunk_segs) / 1000.0
-        vocal_seek = chunk_segs[0]["new_start"] / 1000.0
+        
+        # Tính toán Timeline tuyệt đối của chunk bằng Frame
+        chunk_start_frame = sum(seg["new_frames"] for seg in new_segments[:start_idx])
+        chunk_total_frames = sum(seg["new_frames"] for seg in chunk_segs)
+        chunk_start_sec = chunk_start_frame / fps
+        chunk_dur_sec = chunk_total_frames / fps
 
         cmd_inputs = []
         
         for i, seg in enumerate(chunk_segs):
             s_sec = seg["start"] / 1000.0
-            
             eff_dur_ms = max(10, seg["dur"])
-            eff_new_dur_ms = max(10, seg["new_dur"])
-            dur_sec = eff_dur_ms / 1000.0
             
-            # Khởi tạo mỗi Video Segment = 1 input để ngăn ffmpeg đệm (buffer leak) toàn bộ RAM
-            # BỔ SUNG: Thêm -accurate_seek để cắt mượt không dính Keyframe
-            cmd_inputs.extend(['-ss', f"{s_sec:.3f}"])
-            cmd_inputs.extend(['-accurate_seek'])
-            cmd_inputs.extend(['-t', f"{dur_sec:.3f}"])
-            cmd_inputs.extend(['-i', args.video_in])
+            # Khởi tạo mỗi Video Segment = 1 input (Cắt chính xác)
+            cmd_inputs.extend(['-ss', f"{s_sec:.3f}", '-accurate_seek', '-t', f"{eff_dur_ms/1000.0:.3f}", '-i', args.video_in])
             
-            slow_factor = eff_new_dur_ms / eff_dur_ms
-            # BỔ SUNG: Thêm fps={fps:.2f} để đồng bộ frame, chống giật khựng
+            # Ép hệ số slow_factor để video đầu ra KHỚP CHUẨN số frame
+            slow_factor = (seg["new_frames"] * 1000.0 / fps) / eff_dur_ms
             filter_lines.append(f"[{i}:v]setpts={slow_factor:.6f}*(PTS-STARTPTS),fps={fps:.2f}[v{i}];")
             cv_in += f"[v{i}]"
             
@@ -392,26 +400,24 @@ def main():
             
         if has_vocal:
             voc_input_idx = next_in_idx
-            cmd_inputs.extend(['-ss', f"{vocal_seek:.3f}", '-i', vocal_merged])
+            # CHỐNG LỆCH: Kéo nguyên mảng Vocal đã render ra nhét thẳng vào Chunk, KHÔNG CẮT VỤN
+            cmd_inputs.extend(['-ss', f"{chunk_start_sec:.6f}", '-t', f"{chunk_dur_sec:.6f}", '-i', vocal_merged])
             next_in_idx += 1
 
         for i, seg in enumerate(chunk_segs):
             s_sec = seg["start"] / 1000.0
             eff_dur_ms = max(10, seg["dur"])
-            eff_new_dur_ms = max(10, seg["new_dur"])
+            target_d = seg["new_frames"] / fps
             
-            dur_sec = eff_dur_ms / 1000.0
             rel_s = max(0, s_sec - chunk_min_start)
-            rel_e = rel_s + dur_sec
-            
-            slow_factor = eff_new_dur_ms / eff_dur_ms
+            rel_e = rel_s + (eff_dur_ms / 1000.0)
             
             # BGM
             if has_bgm:
+                slow_factor = (seg["new_frames"] * 1000.0 / fps) / eff_dur_ms
                 speed = 1.0 / slow_factor
                 if eff_dur_ms < 100 or speed < 0.2:
-                    target_d = eff_new_dur_ms / 1000.0
-                    filter_lines.append(f"[{bgm_input_idx}:a]asetpts=PTS-STARTPTS,atrim=start={rel_s:.3f}:end={rel_e:.3f},asetpts=PTS-STARTPTS,apad,atrim=0:{target_d:.3f}[abgm{i}];")
+                    filter_lines.append(f"[{bgm_input_idx}:a]asetpts=PTS-STARTPTS,atrim=start={rel_s:.3f}:end={rel_e:.3f},asetpts=PTS-STARTPTS,apad,atrim=0:{target_d:.6f}[abgm{i}];")
                 else:
                     tspeed = speed
                     atempo_str = ""
@@ -420,35 +426,24 @@ def main():
                     atempo_str += f"atempo={tspeed:.6f}"
                     filter_lines.append(f"[{bgm_input_idx}:a]asetpts=PTS-STARTPTS,atrim=start={rel_s:.3f}:end={rel_e:.3f},asetpts=PTS-STARTPTS,{atempo_str}[abgm{i}];")
             else:
-                target_d = eff_new_dur_ms / 1000.0
-                # BỔ SUNG: Khớp 44100Hz Stereo của Demucs
-                filter_lines.append(f"anullsrc=r=44100:cl=stereo:d={target_d:.3f}[abgm{i}];")
+                filter_lines.append(f"anullsrc=r=44100:cl=stereo:d={target_d:.6f}[abgm{i}];")
             ca_bgm_in += f"[abgm{i}]"
 
-            # Vocals
-            if has_vocal and voc_input_idx >= 0:
-                voc_rel_start = max(0.0, (seg["new_start"] / 1000.0) - vocal_seek)
-                voc_rel_end = voc_rel_start + (eff_new_dur_ms / 1000.0)
-                filter_lines.append(f"[{voc_input_idx}:a]asetpts=PTS-STARTPTS,atrim=start={voc_rel_start:.3f}:end={voc_rel_end:.3f},asetpts=PTS-STARTPTS[avoc{i}];")
-            else:
-                target_d = eff_new_dur_ms / 1000.0
-                # BỔ SUNG: Khớp 24000Hz Mono của TTS
-                filter_lines.append(f"anullsrc=r=24000:cl=mono:d={target_d:.3f}[avoc{i}];")
-            ca_voc_in += f"[avoc{i}]"
-        
+        # Nối hình và nối BGM
         filter_lines.append(f"{cv_in}concat=n={len(chunk_segs)}:v=1:a=0[outv];")
         filter_lines.append(f"{ca_bgm_in}concat=n={len(chunk_segs)}:v=0:a=1[abgm_final];")
-        filter_lines.append(f"{ca_voc_in}concat=n={len(chunk_segs)}:v=0:a=1[avoc_final];")
         
-        # BỔ SUNG: Tách luồng gốc 100% TRƯỚC KHI áp dụng volume
-        filter_lines.append(f"[avoc_final]asplit=2[v_mix][v_vol2];")
+        # Vocal (Lấy thẳng luồng nguyên vẹn, chia 2 để lấy Vocal xuất ra ngoài và gộp Mix)
+        if has_vocal:
+            filter_lines.append(f"[{voc_input_idx}:a]asplit=2[v_mix][v_vol2];")
+        else:
+            filter_lines.append(f"anullsrc=r=24000:cl=mono:d={chunk_dur_sec:.6f},asplit=2[v_mix][v_vol2];")
+        
         filter_lines.append(f"[abgm_final]asplit=2[b_mix][b_vol2];")
         
-        # Bóp volume chỉ dành cho bản Mix gộp vào video mp4 dự phòng
         filter_lines.append(f"[v_mix]volume={args.vocal_vol}[v_vol1];")
         filter_lines.append(f"[b_mix]volume={args.bgm_vol}[b_vol1];")
         
-        # Trộn mix, thêm normalize=0 để không bị bóp nghẹt tiếng
         filter_lines.append(f"[v_vol1][b_vol1]amix=inputs=2:duration=longest:normalize=0[outa]")
             
         chunk_time_str = time.strftime('%H:%M:%S', time.gmtime(chunk_min_start))
@@ -496,27 +491,25 @@ def main():
         # TỐI ƯU ĐỒNG BỘ: Sắp xếp lại subs giống hệt Module 4 để tránh lệch chỉ số (index mismatch)
         raw_subs = sorted(raw_subs, key=lambda s: s.start.ordinal)
         
-        # --- VÁ LỖI LỆCH CHỮ TỪ ĐÂY ---
-        # Bắt buộc phải lọc bỏ sub rác (giống Mod 4) thì Index mới khớp với timing.json!
-        valid_subs = [s for s in raw_subs if s.text.strip() and (s.end.ordinal - s.start.ordinal) > 0]
-        
         new_subs = pysrt.SubRipFile()
         sub_map = {s["index"]: s for s in new_segments if s["type"] == "sub"}
         
-        console.print(f"--- Dang xuat file phu de CapCut ({len(valid_subs)} cau hop le) ---")
+        console.print(f"--- Dang xuat file phu de CapCut ({len(raw_subs)} cau) ---")
         
         missing_count = 0
-        for i, sub in enumerate(valid_subs):
+        # DUYỆT TOÀN BỘ FILE GỐC ĐỂ GIỮ ĐÚNG SỐ INDEX TỪ MOD 4
+        for i, sub in enumerate(raw_subs):
             if i in sub_map:
                 s_info = sub_map[i]
                 
-                # Update SRT dựa trên New Start và New Dur (Đã khớp frame rate)
-                new_subs.append(pysrt.SubRipItem(
-                    index=i+1,
-                    start=pysrt.SubRipTime(milliseconds=s_info["new_start"]),
-                    end=pysrt.SubRipTime(milliseconds=s_info["new_start"] + s_info["new_dur"]),
-                    text=sub.text
-                ))
+                # --- CHỈ LỌC BỎ CÂU RÁC Ở BƯỚC APPEND ĐỂ KHÔNG LÀM LỆCH VÒNG LẶP ---
+                if sub.text.strip() and (sub.end.ordinal - sub.start.ordinal) > 0:
+                    new_subs.append(pysrt.SubRipItem(
+                        index=len(new_subs) + 1,  # Đánh số lại từ 1 cho file mới gọn gàng
+                        start=pysrt.SubRipTime(milliseconds=s_info["new_start"]),
+                        end=pysrt.SubRipTime(milliseconds=s_info["new_start"] + s_info["new_dur"]),
+                        text=sub.text
+                    ))
             else:
                 missing_count += 1
         
@@ -524,6 +517,7 @@ def main():
             console.print(f"[bold red]CẢNH BÁO:[/bold red] Có {missing_count} câu bị thiếu trong quá trình ghép nối!")
             
         new_subs.save(args.srt_out, encoding='utf-8')
+
 
 
     # Cleanup

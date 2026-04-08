@@ -96,6 +96,12 @@ class BumYTCloneExactApp(ctk.CTk):
         self.video_h = 0
         self.scale_f = 1.0
         
+        # New: Subtitle Position & Dragging state
+        self.sub_x_percent = 50.0  # Mặc định ở giữa
+        self.sub_y_percent = 30.0  # Mặc định theo slider (tương ứng MarginV)
+        self.dragging_sub = False
+        self.sub_bbox = None  # (x1, y1, x2, y2) trên canvas
+        
         import dotenv
         dotenv.load_dotenv(".env")
 
@@ -204,7 +210,12 @@ class BumYTCloneExactApp(ctk.CTk):
             self._set_video_path(path)
             
             self.cap = cv2.VideoCapture(path)
+            if not self.cap.isOpened():
+                self.log(f"Lỗi: Không thể mở video {path}", level="error")
+                return
+            
             self.video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+
             self.video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
@@ -231,87 +242,6 @@ class BumYTCloneExactApp(ctk.CTk):
             curr = int(self.roi_slider.get())
             self._update_roi_frame(curr)
 
-    def _update_roi_frame(self, frame_idx):
-        if not self.cap: return
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        success, frame = self.cap.read()
-        if not success: return
-        
-        # Resize to fit canvas
-        cw = self.roi_canvas.winfo_width()
-        ch = self.roi_canvas.winfo_height()
-        if cw < 100: cw = 800 
-        if ch < 100: ch = 500
-
-        self.scale_f = min(cw/self.video_w, ch/self.video_h)
-        nw = int(self.video_w * self.scale_f)
-        nh = int(self.video_h * self.scale_f)
-        
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame_rgb)
-        img_resized = img.resize((nw, nh), Image.Resampling.LANCZOS)
-        
-        self.tk_image = ImageTk.PhotoImage(img_resized)
-        self.roi_canvas.delete("all")
-        self.roi_canvas.create_image(cw//2, ch//2, image=self.tk_image, anchor="center")
-        
-        if self.roi_coords:
-            self._draw_roi_rect()
-
-    def _draw_roi_rect(self):
-        if not self.roi_coords: return
-        cw = self.roi_canvas.winfo_width()
-        ch = self.roi_canvas.winfo_height()
-        nw = int(self.video_w * self.scale_f)
-        nh = int(self.video_h * self.scale_f)
-        
-        x, y, w, h = self.roi_coords
-        off_x = (cw - nw) // 2
-        off_y = (ch - nh) // 2
-        
-        x1 = (x * self.scale_f) + off_x
-        y1 = (y * self.scale_f) + off_y
-        x2 = x1 + (w * self.scale_f)
-        y2 = y1 + (h * self.scale_f)
-        self.roi_canvas.create_rectangle(x1, y1, x2, y2, outline="red", width=3, tags="roi_rect")
-
-    def _on_roi_press(self, event):
-        if not self.cap: return
-        self.start_x = event.x
-        self.start_y = event.y
-        self.roi_canvas.delete("roi_rect")
-        self.roi_rect_id = self.roi_canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=3, tags="roi_rect")
-
-    def _on_roi_drag(self, event):
-        if not self.cap: return
-        self.roi_canvas.coords(self.roi_rect_id, self.start_x, self.start_y, event.x, event.y)
-
-    def _on_roi_release(self, event):
-        if not self.cap: return
-        cw = self.roi_canvas.winfo_width()
-        ch = self.roi_canvas.winfo_height()
-        nw = int(self.video_w * self.scale_f)
-        nh = int(self.video_h * self.scale_f)
-        off_x = (cw - nw) // 2
-        off_y = (ch - nh) // 2
-        
-        rx1 = (min(self.start_x, event.x) - off_x) / self.scale_f
-        ry1 = (min(self.start_y, event.y) - off_y) / self.scale_f
-        rx2 = (max(self.start_x, event.x) - off_x) / self.scale_f
-        ry2 = (max(self.start_y, event.y) - off_y) / self.scale_f
-        
-        rx1 = max(0, min(self.video_w, rx1))
-        ry1 = max(0, min(self.video_h, ry1))
-        rx2 = max(0, min(self.video_w, rx2))
-        ry2 = max(0, min(self.video_h, ry2))
-        
-        self.roi_coords = (int(rx1), int(ry1), int(rx2-rx1), int(ry2-ry1))
-        self.log(f"📍 Đã quét vùng mờ: {self.roi_coords}")
-
-    def _clear_roi(self):
-        self.roi_coords = None
-        self.roi_canvas.delete("roi_rect")
-        self.log("🗑️ Đã xóa vùng chọn Blur.")
 
     def _build_right_panel(self):
         # This replaces the original main content frame logic but inside the right column
@@ -399,8 +329,9 @@ class BumYTCloneExactApp(ctk.CTk):
         self.entry_ffmpeg.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
         ctk.CTkButton(p_grid, text="Cấu hình...", width=100, fg_color=B_FRAME, command=lambda: self.pick_file(self.entry_ffmpeg, [("Exe", "*.exe")])).grid(row=2, column=2, padx=5)
 
-        # Utility for run_tab3
-        self.ffmpeg_path = self.entry_ffmpeg
+        # Utility for ffmpeg path
+        self.ffmpeg_path = ""
+
         
         # Card 3: CHẾ ĐỘ XỬ LÝ (MODULAR)
         card_mode = ctk.CTkFrame(scroll, fg_color=B_SIDEBAR, corner_radius=15, border_width=1, border_color="#2b2b2b")
@@ -516,18 +447,39 @@ class BumYTCloneExactApp(ctk.CTk):
                 try:
                     font = ImageFont.truetype("arialbd.ttf", f_size)
                 except:
-                    font = ImageFont.load_default()
+                    try:
+                        # Thử tìm font khác trên Windows
+                        font = ImageFont.truetype("arial.ttf", f_size)
+                    except:
+                        font = ImageFont.load_default()
+
 
                 sample_text = "YTDUONG - Test Sub CapCut"
                 style = self.opt_sub_style.get()
-                # MarginV tương ứng: ui_y * 2.0 để dễ căn chỉnh trên preview
-                margin_v = int(self.slider_sub_y.get() * self.scale_f * 2.0)
                 
-                # Tính toán tọa độ để chữ nằm giữa
+                # Sync slider Y với sub_y_percent (nếu cần hiển thị)
+                self.slider_sub_y.set(self.sub_y_percent)
+                
+                # MarginV tương ứng: sub_y_percent * 2.0 để dễ căn chỉnh trên preview
+                margin_v = int(self.sub_y_percent * self.scale_f * 2.0)
+                
+                # Tính toán tọa độ dựa trên % (X) và MarginV (Y)
                 bbox = draw.textbbox((0, 0), sample_text, font=font)
                 tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                tx = (nw - tw) / 2
+                
+                tx = (nw * (self.sub_x_percent / 100.0)) - (tw / 2.0)
                 ty = nh - th - margin_v
+
+                # Lưu Bounding Box để bắt sự kiện chuột (coords trên canvas thực tế)
+                cw_actual = self.roi_canvas.winfo_width()
+                ch_actual = self.roi_canvas.winfo_height()
+                if cw_actual < 100: cw_actual = 900
+                if ch_actual < 100: ch_actual = 600
+                off_x = (cw_actual - nw) // 2
+                off_y = (ch_actual - nh) // 2
+                
+                self.last_tw, self.last_th = tw, th
+                self.sub_bbox = (tx + off_x, ty + off_y, tx + off_x + tw, ty + off_y + th)
 
                 # Đổ bóng
                 if shad_th > 0:
@@ -582,13 +534,56 @@ class BumYTCloneExactApp(ctk.CTk):
     def _on_roi_press(self, event):
         self.start_x = event.x
         self.start_y = event.y
+        
+        # Kiểm tra xem có bấm vào phụ đề không
+        if hasattr(self, 'sub_bbox') and self.sub_bbox and getattr(self, 'chk_hardsub', None) and self.chk_hardsub.get():
+            x1, y1, x2, y2 = self.sub_bbox
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self.dragging_sub = True
+                return
+
+        self.dragging_sub = False
         self.roi_canvas.delete("roi_rect") # Xóa mọi hình chữ nhật cũ trước khi vẽ cái mới
         self.roi_rect_id = self.roi_canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=3, tags="roi_rect")
 
     def _on_roi_drag(self, event):
-        self.roi_canvas.coords(self.roi_rect_id, self.start_x, self.start_y, event.x, event.y)
+        if hasattr(self, 'dragging_sub') and self.dragging_sub:
+            # Tính toán vị trí mới dựa trên chuột
+            cw = self.roi_canvas.winfo_width()
+            ch = self.roi_canvas.winfo_height()
+            nw = int(self.video_w * self.scale_f)
+            nh = int(self.video_h * self.scale_f)
+            if nw == 0 or nh == 0: return
+
+            off_x = (cw - nw) // 2
+            off_y = (ch - nh) // 2
+            
+            # Tọa độ chuột so với khung video
+            vx = event.x - off_x
+            vy = event.y - off_y
+            
+            # Cập nhật X %
+            self.sub_x_percent = max(0, min(100, (vx / nw) * 100.0))
+            
+            # Cập nhật Y (MarginV)
+            # ty = nh - th - margin_v => margin_v = nh - th - ty
+            # Lấy tâm chữ làm điểm mốc cho mượt
+            th = getattr(self, 'last_th', 20)
+            ty_target = vy - (th / 2.0)
+            margin_v = nh - th - ty_target
+            self.sub_y_percent = max(0, min(500, margin_v / (self.scale_f * 2.0)))
+            
+            self._redraw_current_frame()
+        else:
+            if hasattr(self, 'roi_rect_id'):
+                self.roi_canvas.coords(self.roi_rect_id, self.start_x, self.start_y, event.x, event.y)
 
     def _on_roi_release(self, event):
+        if hasattr(self, 'dragging_sub') and self.dragging_sub:
+            self.dragging_sub = False
+            self.log(f"📍 Đã đặt vị trí Sub: X={self.sub_x_percent:.1f}%, Y={self.sub_y_percent:.1f}")
+            return
+            
         # Calculate real video coordinates
         cw = self.roi_canvas.winfo_width()
         ch = self.roi_canvas.winfo_height()
@@ -614,7 +609,8 @@ class BumYTCloneExactApp(ctk.CTk):
         self.log(f"📍 Đã chọn vùng Blur: x={self.roi_coords[0]}, y={self.roi_coords[1]}, w={self.roi_coords[2]}, h={self.roi_coords[3]}")
 
     def run_blur_process(self):
-        video_in = self.entry_video_blur.get().strip()
+        video_in = self.entry_video_t3.get().strip()
+
         if not video_in or not os.path.exists(video_in):
             messagebox.showerror("Lỗi", "Vui lòng chọn Video nguồn!")
             return
@@ -634,8 +630,9 @@ class BumYTCloneExactApp(ctk.CTk):
             "--w", str(self.roi_coords[2]),
             "--h", str(self.roi_coords[3]),
             "--blur", "25",
-            "--ffmpeg_path", self.ffmpeg_path.get().strip()
+            "--ffmpeg_path", self.entry_ffmpeg.get().strip()
         ]
+
         
         threading.Thread(target=self._run_cmds, args=([cmd], "LÀM MỜ THÀNH CÔNG!")).start()
 
@@ -694,11 +691,12 @@ class BumYTCloneExactApp(ctk.CTk):
         
         self.log(f"\n>>> BẮT ĐẦU XỬ LÝ (Dubbing & Sync) - {time.strftime('%H:%M:%S')}")
         
-        # TỰ ĐỘNG LƯU TIKTOK SESSION ID TỪ GIAO DIỆN VÀO FILE .ENV
+        # AN TOÀN: Cập nhật key TikTok Session ID mà không xóa sạch file .env
         t_session = self.entry_tiktok_session.get().strip()
         if t_session:
-            with open(".env", "w", encoding="utf-8") as f:
-                f.write(f"TIKTOK_SESSION_ID={t_session}\n")
+            import dotenv
+            dotenv.set_key(".env", "TIKTOK_SESSION_ID", t_session)
+
         
         # Mapping voice config
         tts_prov = self.opt_tts_prov.get()
@@ -737,9 +735,9 @@ class BumYTCloneExactApp(ctk.CTk):
         audio_full = os.path.join(self.out_dir, "voices_full.wav")
         srt_synced = os.path.join(self.out_dir, "vi_synced.srt")
         timing_json = os.path.join(self.out_dir, "tts_timing.json")
-        ffmpeg_bin = self.ffmpeg_path if hasattr(self, "ffmpeg_path") and isinstance(self.ffmpeg_path, str) else "ffmpeg"
-        if not isinstance(ffmpeg_bin, str):
-             ffmpeg_bin = self.ffmpeg_path.get().strip()
+        ffmpeg_bin = self.entry_ffmpeg.get().strip()
+        if not ffmpeg_bin: ffmpeg_bin = "ffmpeg"
+
 
         tasks = []
         
@@ -788,8 +786,9 @@ class BumYTCloneExactApp(ctk.CTk):
             video_final_hardsub = os.path.join(self.out_dir, "video_FINAL_HARDSUB.mp4")
             style_name = self.opt_sub_style.get()
             
-            # Lấy thông số từ UI
-            ui_y = self.slider_sub_y.get()
+            # Lấy thông số từ UI (ưu tiên giá trị từ việc kéo thả)
+            ui_y = self.sub_y_percent
+            ui_x = self.sub_x_percent
             ui_size = self.slider_font_size.get()
             ui_outline = self.slider_outline.get()
             ui_shadow = self.slider_shadow.get()
@@ -801,8 +800,13 @@ class BumYTCloneExactApp(ctk.CTk):
             out_th = int(ui_outline * 1.2)
             shad_th = int(ui_shadow * 1.2)
             
+            # Tính toán MarginL/MarginR để dịch chuyển tâm chữ theo X (PlayResX=1920)
+            diff = int((ui_x / 100.0) * 3840 - 1920)
+            m_left = diff if diff > 0 else 0
+            m_right = -diff if diff < 0 else 0
+
             # QUAN TRỌNG: Thêm PlayResY=1080 để FFmpeg hiểu tỷ lệ màn hình là Full HD
-            base_style = f"Fontname=Arial,Fontsize={f_size},Alignment=2,MarginV={margin_v},Outline={out_th},Shadow={shad_th},PlayResY=1080"
+            base_style = f"Fontname=Arial,Fontsize={f_size},Alignment=2,MarginL={m_left},MarginR={m_right},MarginV={margin_v},Outline={out_th},Shadow={shad_th},PlayResY=1080"
             
             # Định dạng màu BGR chuẩn cho FFmpeg (Màu vàng: &H00FFFF&)
             if "Vàng" in style_name: 
@@ -856,9 +860,9 @@ class BumYTCloneExactApp(ctk.CTk):
             messagebox.showerror("Lỗi", "Vui lòng Vẽ Vùng Mờ trên video trước!")
             return
             
-        ffmpeg_bin = self.ffmpeg_path if hasattr(self, "ffmpeg_path") and isinstance(self.ffmpeg_path, str) else "ffmpeg"
-        if not isinstance(ffmpeg_bin, str):
-             ffmpeg_bin = self.ffmpeg_path.get().strip()
+        ffmpeg_bin = self.entry_ffmpeg.get().strip()
+        if not ffmpeg_bin: ffmpeg_bin = "ffmpeg"
+
              
         video_out = os.path.join(self.out_dir, "video_blurred.mp4")
         
@@ -949,16 +953,18 @@ class BumYTCloneExactApp(ctk.CTk):
                             # Xóa các file trong output/
                             for f in os.listdir(self.out_dir):
                                 if f not in keep_files:
-                                    f_path = os.path.join(self.out_dir, f)
-                                    try:
-                                        if os.path.isfile(f_path):
-                                            os.remove(f_path)
-                                            cleaned_count += 1
-                                        elif os.path.isdir(f_path):
-                                            import shutil
-                                            shutil.rmtree(f_path)
-                                            cleaned_count += 1
-                                    except: pass
+                                    if f.startswith("_") or f in ["tts_timing.json", "voices.wav", "bgm_clean.wav"]:
+                                        f_path = os.path.join(self.out_dir, f)
+                                        try:
+                                            if os.path.isfile(f_path):
+                                                os.remove(f_path)
+                                                cleaned_count += 1
+                                            elif os.path.isdir(f_path):
+                                                import shutil
+                                                shutil.rmtree(f_path)
+                                                cleaned_count += 1
+                                        except: pass
+
                             
                             # XEM THÊM: Xóa sạch file trong folder temp/ nhưng giữ lại folder theo yêu cầu
                             if os.path.exists("temp"):
@@ -1028,8 +1034,16 @@ class BumYTCloneExactApp(ctk.CTk):
         except:
             pass
 
+        # 3. Giải phóng OpenCV
+        if hasattr(self, 'cap') and self.cap:
+            try:
+                self.cap.release()
+            except:
+                pass
+
         self.destroy()
         sys.exit(0)
+
 
 def route_cli():
     if getattr(sys, 'frozen', False) and len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
@@ -1043,27 +1057,41 @@ def route_cli():
                 import mod2_asr
                 mod2_asr.main()
             elif script == "mod3_translate.py":
-                import mod3_translate
-                mod3_translate.main()
+                try:
+                    import mod3_translate
+                    mod3_translate.main()
+                except ImportError:
+                    print("Module mod3_translate.py không tồn tại.")
             elif script == "mod4_tts_dubbing.py":
                 import mod4_tts_dubbing
                 mod4_tts_dubbing.main()
+
             elif script == "mod5_mux_video.py":
-                import mod5_mux_video
-                mod5_mux_video.main()
+                try:
+                    import mod5_mux_video
+                    mod5_mux_video.main()
+                except ImportError:
+                    print("Module mod5_mux_video.py không tồn tại.")
             elif script == "mod6_capcut_export.py":
-                import mod6_capcut_export
-                mod6_capcut_export.main()
+                try:
+                    import mod6_capcut_export
+                    mod6_capcut_export.main()
+                except ImportError:
+                    print("Module mod6_capcut_export.py không tồn tại.")
             elif script == "mod7_video_sync.py":
                 import mod7_video_sync
                 mod7_video_sync.main()
             elif script == "tool_get_blur_box.py":
-                import tool_get_blur_box
-                from tool_get_blur_box import main
-                main()
+                try:
+                    import tool_get_blur_box
+                    from tool_get_blur_box import main
+                    main()
+                except ImportError:
+                    print("Module tool_get_blur_box.py không tồn tại.")
         except Exception as e:
             print(f"Subprocess system error: {e}")
         sys.exit(0)
+
 
 if __name__ == "__main__":
     import multiprocessing
