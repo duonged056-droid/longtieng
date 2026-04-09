@@ -753,7 +753,7 @@ class BumYTCloneExactApp(ctk.CTk):
                 "--tts_out", output_mp3, 
                 "--speaker_mapping", mapping,
                 "--speed_rate", "1.0",
-                "--max_speed_ratio", "1.25",
+                "--max_speed_ratio", "1.45",  # Tăng tốc độ ép AI lên 1.45x để rút ngắn file voices
                 "--ffmpeg_path", ffmpeg_bin,
                 "--keep_segments"
             ])

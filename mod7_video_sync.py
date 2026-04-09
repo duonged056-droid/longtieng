@@ -297,8 +297,8 @@ def main():
                 })
                 current_new_frame += start_frame - current_new_frame
 
-        # Xử lý thoại (Sub)
-        raw_target_dur = min(max(orig_dur, tts_dur), int(orig_dur * 1.5))
+        # Xử lý thoại (Sub) - MỞ KHÓA 100% ĐỂ VIDEO VÀ SUB DÀI BẰNG VOICES.WAV
+        raw_target_dur = max(orig_dur, tts_dur)
         sub_frames = round(raw_target_dur * fps / 1000.0)
         if sub_frames < 1: sub_frames = 1 # Chống lỗi chia 0
         
